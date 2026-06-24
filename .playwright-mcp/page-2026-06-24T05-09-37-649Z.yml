@@ -1,0 +1,42 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - generic:
+      - link "주요 콘텐츠로 이동" [ref=e2] [cursor=pointer]
+      - link "접근성 도움말" [ref=e3] [cursor=pointer]:
+        - /url: https://support.google.com/websearch/answer/181196?hl=ko
+  - generic [ref=e8]:
+    - search [ref=e9]:
+      - generic [ref=e11]:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - 'link "2026년 월드컵: 감아차기의 기술" [ref=e13] [cursor=pointer]':
+          - /url: https://www.google.com/webhp?hl=ko&ictx=2&sa=X&ved=0ahUKEwjIodiOjp-VAxVUmVYBHbWhNmEQPQgK
+          - 'img "2026년 월드컵: 감아차기의 기술" [ref=e14]'
+        - generic [ref=e15]:
+          - link:
+            - /url: https://www.google.com/webhp?hl=ko&ictx=0&sa=X&ved=0ahUKEwjIodiOjp-VAxVUmVYBHbWhNmEQpYkNCAw
+          - generic [ref=e16]:
+            - combobox "검색" [ref=e19]: 농협정보시스템 농협정보시스템
+            - generic [ref=e20]:
+              - button "지우기" [ref=e22] [cursor=pointer]:
+                - img [ref=e24]
+              - generic [ref=e27]:
+                - button "입력 도구" [ref=e28] [cursor=pointer]:
+                  - img [ref=e30]
+                - button "음성 검색" [ref=e32] [cursor=pointer]:
+                  - img [ref=e33]
+                - button "이미지로 검색" [ref=e35] [cursor=pointer]:
+                  - img [ref=e36]
+          - button "검색" [ref=e38] [cursor=pointer]:
+            - img [ref=e41]
+    - generic [ref=e43]:
+      - button "설정" [ref=e45] [cursor=pointer]
+      - button "공유" [ref=e46] [cursor=pointer]:
+        - img [ref=e50]
+      - generic [ref=e52]:
+        - button "Google 앱" [ref=e54] [cursor=pointer]:
+          - img [ref=e55]
+        - link "로그인" [ref=e59] [cursor=pointer]:
+          - /url: https://accounts.google.com/ServiceLogin?hl=ko&passive=true&continue=https://www.google.com/search%3Fq%3D%25EB%2586%258D%25ED%2598%2591%25EC%25A0%2595%25EB%25B3%25B4%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%26sca_esv%3De43a3ddc6f999d2a%26source%3Dhp%26ei%3DiGY7atTeFLHd2roPt-Kf6Qs%26iflsig%3DABILxe8AAAAAajt0mMeWvhS1b4Xe2Qdjrf1fp9SpIMoG%26ved%3D0ahUKEwjUwpeKjp-VAxWxrlYBHTfxJ70Q4dUDCC4%26uact%3D5%26oq%3D%25EB%2586%258D%25ED%2598%2591%25EC%25A0%2595%25EB%25B3%25B4%25EC%258B%259C%25EC%258A%25A4%25ED%2585%259C%26gs_lp%3DEgdnd3Mtd2l6IhXrho3tmJHsoJXrs7Tsi5zsiqTthZwyCxAuGIAEGMcBGK8BMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBRAAGIAEMgUQABiABDIFEAAYgAQyBBAAGB5ImRVQAFgAcAB4AJABAJgBbaABbaoBAzAuMbgBA8gBAPgBAZgCAaACgQGYAwCSBwMwLjGgB_4IsgcDMC4xuAeBAcIHAzMtMcgHD4AIAQ%26sclient%3Dgws-wiz&ec=futura_srp_og_si_72236_p
