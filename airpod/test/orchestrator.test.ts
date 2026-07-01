@@ -74,18 +74,31 @@ test("PAT never leaks into the persisted scan record", async () => {
   assert.ok(!serialized.includes(VULN_TOKEN), "raw token must not appear anywhere in the record");
 });
 
-test("clone failure falls back to local image and still completes", async () => {
+test("clone failure ensures the fallback image, runs it, and completes", async () => {
   const store = memStore();
   const scan = makeScan("fb1");
-  await runPipeline(scan, deps(new FakeExecutor(safeOptions()), null, store, { cloneFails: true }));
+  const exec = new FakeExecutor(safeOptions());
+  await runPipeline(scan, deps(exec, null, store, { cloneFails: true }));
 
   const final = store.get("fb1")!;
   assert.equal(final.status, "completed");
   assert.equal(final.usedLocalImageFallback, true);
+  assert.equal(final.imageRef, "airpod/fallback:local");
+  assert.ok(exec.ensuredImages.includes("airpod/fallback:local"), "fallback image must be ensured");
   const st = stages(final);
   assert.equal(st.get("clone"), "failed");
   assert.equal(st.get("build"), "skipped");
+  assert.equal(st.get("sandbox"), "ok"); // fallback 이미지로 sandbox가 실행됨
   assert.equal(st.get("done"), "ok");
+  // 정적 근거(Dockerfile)는 없지만 런타임 항목은 fallback 이미지에서 관찰된다
+  assert.equal(final.results.find((r) => r.id === "C-05")!.status, "pass");
+});
+
+test("ensureImage is not called on the normal (built-image) path", async () => {
+  const store = memStore();
+  const exec = new FakeExecutor(safeOptions());
+  await runPipeline(makeScan("noens1"), deps(exec, SAFE_DOCKERFILE, store));
+  assert.equal(exec.ensuredImages.length, 0);
 });
 
 test("sandbox failure degrades runtime checks without failing the scan", async () => {

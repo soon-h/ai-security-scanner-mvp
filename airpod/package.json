@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import tsx --test \"test/**/*.test.ts\""
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "fallback:build": "docker build -t airpod/fallback:local fallback"
   },
   "dependencies": {
     "next": "15.5.19",

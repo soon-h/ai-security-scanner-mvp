@@ -20,6 +20,16 @@ export class DockerExecutor implements RuntimeExecutor {
     return { imageRef: tag, logTail: out.split("\n").slice(-20).join("\n") };
   }
 
+  async ensureImage(ref: string, buildContextDir: string): Promise<void> {
+    try {
+      await docker(["image", "inspect", ref], 10_000);
+      return; // 이미 존재
+    } catch {
+      // 없으면 빌드
+    }
+    await docker(["build", "-t", ref, buildContextDir], 300_000);
+  }
+
   async run(imageRef: string): Promise<RunHandle> {
     // 격리 실행: 네트워크 차단, 읽기전용 FS, 모든 capability 제거, 메모리/PID 제한.
     // 점검을 위해 컨테이너를 유지해야 하므로 sleep 엔트리포인트로 띄운다.

@@ -17,6 +17,10 @@ export class StubExecutor implements RuntimeExecutor {
     };
   }
 
+  async ensureImage(_ref: string, _buildContextDir: string): Promise<void> {
+    // docker 미설치 — fallback 이미지 보장은 no-op (run도 시뮬레이션이므로 항상 성공).
+  }
+
   async run(imageRef: string): Promise<RunHandle> {
     return { containerId: `stub-${Math.random().toString(36).slice(2, 8)}`, imageRef };
   }

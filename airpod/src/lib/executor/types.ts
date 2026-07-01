@@ -10,6 +10,10 @@ export interface RuntimeExecutor {
   // 이미지 빌드. 실패 시 예외를 던진다(오케스트레이터가 local fallback 처리).
   build(workdir: string, tag: string): Promise<BuildResult>;
 
+  // 지정 이미지가 로컬에 없으면 buildContextDir에서 빌드한다 (fallback 이미지 보장).
+  // 실패 시 예외를 던진다(sandbox 실행이 실패하며 런타임 항목은 degrade).
+  ensureImage(ref: string, buildContextDir: string): Promise<void>;
+
   // 격리 옵션 하에 컨테이너 실행. 점검이 끝나면 stop()으로 정리한다.
   run(imageRef: string): Promise<RunHandle>;
 

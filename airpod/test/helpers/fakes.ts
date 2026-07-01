@@ -21,12 +21,16 @@ export class FakeExecutor implements RuntimeExecutor {
   readonly kind = "docker" as const;
   readonly source: EvidenceSource;
   stopped = false;
+  ensuredImages: string[] = [];
   constructor(private readonly o: FakeOptions = {}) {
     this.source = o.source ?? "docker";
   }
   async build(_workdir: string, tag: string): Promise<BuildResult> {
     if (this.o.buildFails) throw new Error("fake build failure");
     return { imageRef: tag, logTail: "fake build ok" };
+  }
+  async ensureImage(ref: string, _buildContextDir: string): Promise<void> {
+    this.ensuredImages.push(ref);
   }
   async run(imageRef: string): Promise<RunHandle> {
     if (this.o.runFails) throw new Error("fake run failure");

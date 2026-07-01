@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { ScanRecord, StageId, StageState, CheckResult } from "../types";
 import { saveScan as defaultSaveScan } from "../store";
 import { pickExecutor as defaultPickExecutor } from "../executor";
@@ -8,6 +9,8 @@ import { evaluateAll } from "../analysis/rules";
 import { analyzeResults as defaultAnalyzeResults } from "../analysis/claude";
 
 const FALLBACK_IMAGE = "airpod/fallback:local";
+// fallback 이미지 빌드 컨텍스트. 앱 루트(process.cwd())의 fallback/ 디렉터리에 Dockerfile이 있다.
+const FALLBACK_CONTEXT = path.join(process.cwd(), "fallback");
 
 // 파이프라인이 의존하는 외부 어댑터. 기본값은 실제 구현이며, 테스트는 fake로 교체한다 (spec: 단일 seam).
 export interface PipelineDeps {
@@ -112,6 +115,10 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     // 3. Sandbox 실행 (격리 옵션)
     await begin("sandbox");
     try {
+      // fallback 이미지를 쓰는 경우 로컬에 없으면 번들된 Dockerfile로 빌드해 둔다.
+      if (imageRef === FALLBACK_IMAGE) {
+        await executor.ensureImage(FALLBACK_IMAGE, FALLBACK_CONTEXT);
+      }
       handle = await executor.run(imageRef);
       await finish("sandbox", "ok", `container=${handle.containerId.slice(0, 12)} (network none, read-only, cap-drop ALL)`);
     } catch (err) {
