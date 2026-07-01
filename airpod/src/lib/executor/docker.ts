@@ -144,6 +144,40 @@ export class DockerExecutor implements RuntimeExecutor {
       return { kind: "apache", configText: "", configPath: candidates[0] };
     }
 
+    // tomcat 탐지: 공식 이미지는 CATALINA_HOME/bin이 PATH에 있어 catalina.sh를 찾을 수 있다.
+    let hasTomcat = false;
+    try {
+      const which = await docker(["exec", id, "sh", "-c", "command -v catalina.sh || true"]);
+      hasTomcat = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (hasTomcat) {
+      // server.xml(실행 설정) + web.xml(디폴트 서블릿/에러페이지)을 이어붙여 하나의 텍스트로 다룬다.
+      const candidates = [
+        { server: "/usr/local/tomcat/conf/server.xml", web: "/usr/local/tomcat/conf/web.xml" },
+        { server: "/etc/tomcat9/server.xml", web: "/etc/tomcat9/web.xml" },
+        { server: "/etc/tomcat/server.xml", web: "/etc/tomcat/web.xml" },
+      ];
+      for (const p of candidates) {
+        try {
+          const serverXml = await docker(["exec", id, "cat", p.server]);
+          let webXml = "";
+          try {
+            webXml = await docker(["exec", id, "cat", p.web]);
+          } catch {
+            // web.xml 없어도 server.xml만으로 진행
+          }
+          if (serverXml.trim().length > 0) {
+            return { kind: "tomcat", configText: `${serverXml}\n${webXml}`, configPath: p.server };
+          }
+        } catch {
+          // 다음 후보
+        }
+      }
+      return { kind: "tomcat", configText: "", configPath: candidates[0].server };
+    }
+
     return null;
   }
 

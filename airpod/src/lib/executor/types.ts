@@ -65,7 +65,7 @@ export interface FileStat {
 }
 
 export interface WebServerInfo {
-  kind: "nginx" | "apache";
-  configText: string; // nginx: `nginx -T` 병합 설정 / apache: 주 설정 파일
+  kind: "nginx" | "apache" | "tomcat";
+  configText: string; // nginx: `nginx -T` 병합 설정 / apache: 주 설정 파일 / tomcat: server.xml+web.xml 이어붙임
   configPath: string; // 주 설정 파일 경로 (권한 점검용)
 }

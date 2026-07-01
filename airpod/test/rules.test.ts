@@ -5,7 +5,7 @@ import { evaluateAll } from "../src/lib/analysis/rules";
 import type { RunHandle } from "../src/lib/executor/types";
 import type { CheckStatus } from "../src/lib/types";
 import { FakeExecutor, vulnerableOptions, safeOptions } from "./helpers/fakes";
-import { VULN_DOCKERFILE, SAFE_DOCKERFILE, VULN_APACHE, SAFE_APACHE } from "./helpers/fixtures";
+import { VULN_DOCKERFILE, SAFE_DOCKERFILE, VULN_APACHE, SAFE_APACHE, VULN_TOMCAT, SAFE_TOMCAT } from "./helpers/fixtures";
 
 const HANDLE: RunHandle = { containerId: "c", imageRef: "i" };
 
@@ -79,6 +79,40 @@ test("apache web server: hardened config passes all W items", async () => {
   for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
     assert.equal(m.get(id), "pass", `${id} should pass on hardened apache`);
   }
+});
+
+test("tomcat web server: vulnerable config + root runtime UID → fail", async () => {
+  const exec = new FakeExecutor({
+    runtimeUid: 0, // W-21: tomcat은 config가 아니라 런타임 UID로 판단
+    webServer: { kind: "tomcat", configPath: "/usr/local/tomcat/conf/server.xml", configText: VULN_TOMCAT },
+    fileStats: { "/usr/local/tomcat/conf/server.xml": { path: "x", owner: "root", group: "root", mode: "666" } },
+  });
+  const m = await statusMap(null, exec, HANDLE);
+  for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
+    assert.equal(m.get(id), "fail", `${id} should fail on vulnerable tomcat`);
+  }
+});
+
+test("tomcat web server: hardened config + non-root runtime UID passes all W items", async () => {
+  const exec = new FakeExecutor({
+    runtimeUid: 1000,
+    webServer: { kind: "tomcat", configPath: "/usr/local/tomcat/conf/server.xml", configText: SAFE_TOMCAT },
+    fileStats: { "/usr/local/tomcat/conf/server.xml": { path: "x", owner: "root", group: "root", mode: "644" } },
+  });
+  const m = await statusMap(null, exec, HANDLE);
+  for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
+    assert.equal(m.get(id), "pass", `${id} should pass on hardened tomcat`);
+  }
+});
+
+test("tomcat web server: unobservable runtime UID → W-21 review, never a fabricated pass/fail", async () => {
+  const exec = new FakeExecutor({
+    runtimeUid: null,
+    webServer: { kind: "tomcat", configPath: "/usr/local/tomcat/conf/server.xml", configText: SAFE_TOMCAT },
+    fileStats: { "/usr/local/tomcat/conf/server.xml": { path: "x", owner: "root", group: "root", mode: "644" } },
+  });
+  const m = await statusMap(null, exec, HANDLE);
+  assert.equal(m.get("W-21"), "review");
 });
 
 test("source is propagated from the executor into results", async () => {

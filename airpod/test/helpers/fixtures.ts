@@ -46,6 +46,51 @@ export const SAFE_APACHE = [
   "</Directory>",
 ].join("\n");
 
+// Tomcat 설정 픽스처 (Slice 6). server.xml + web.xml을 이어붙인 형태(executor가 넘기는 형태와 동일).
+export const VULN_TOMCAT = [
+  '<Connector port="8080" protocol="HTTP/1.1" />', // server 속성 없음 → 기본 배너 노출 (W-26)
+  "<Host>",
+  '  <Valve className="org.apache.catalina.valves.RemoteIpValve" />', // AccessLogValve 없음 (W-08)
+  "</Host>",
+  "<web-app>",
+  "  <servlet>",
+  "    <servlet-name>default</servlet-name>",
+  "    <init-param>",
+  "      <param-name>listings</param-name>",
+  "      <param-value>true</param-value>", // W-01 fail
+  "    </init-param>",
+  "    <init-param>",
+  "      <param-name>readonly</param-name>",
+  "      <param-value>false</param-value>", // W-25 fail
+  "    </init-param>",
+  "  </servlet>",
+  "</web-app>", // <error-page> 없음 (W-09 fail)
+].join("\n");
+
+export const SAFE_TOMCAT = [
+  '<Connector port="8080" protocol="HTTP/1.1" server="WebServer" />', // W-26 pass
+  "<Host>",
+  '  <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" />', // W-08 pass
+  "</Host>",
+  "<web-app>",
+  "  <servlet>",
+  "    <servlet-name>default</servlet-name>",
+  "    <init-param>",
+  "      <param-name>listings</param-name>",
+  "      <param-value>false</param-value>", // W-01 pass
+  "    </init-param>",
+  "    <init-param>",
+  "      <param-name>readonly</param-name>",
+  "      <param-value>true</param-value>", // W-25 pass
+  "    </init-param>",
+  "  </servlet>",
+  "  <error-page>", // W-09 pass
+  "    <error-code>404</error-code>",
+  "    <location>/404.html</location>",
+  "  </error-page>",
+  "</web-app>",
+].join("\n");
+
 export function makeScan(id: string, repoUrl = "https://example.com/repo.git"): ScanRecord {
   const now = new Date().toISOString();
   return {

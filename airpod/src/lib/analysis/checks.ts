@@ -46,9 +46,11 @@ export async function collectEvidence(
   checks.push(await evidenceFilePerm("U-22", "/etc/services", executor, handle));
   checks.push(await evidenceU25(executor, handle));
 
-  // 웹 서비스 축 (Slice 4: nginx / Slice 5: apache). 웹서버 미탐지 시 전부 skip.
+  // 웹 서비스 축 (Slice 4: nginx / Slice 5: apache / Slice 6: tomcat). 웹서버 미탐지 시 전부 skip.
   const web = handle ? await executor.detectWebServer(handle) : null;
-  const wf = analyzeWeb(web);
+  // tomcat은 실행 계정을 설정 지시어로 알 수 없어(W-21) 런타임 관찰 UID에 의존한다.
+  const webRuntimeUid = web?.kind === "tomcat" && handle ? await executor.inspectRuntimeUid(handle) : null;
+  const wf = analyzeWeb(web, webRuntimeUid);
   checks.push(evidenceW01(wf));
   checks.push(evidenceW08(wf));
   checks.push(evidenceW09(wf));
@@ -325,9 +327,11 @@ function evidenceW09(w: WebFacts): RawCheck {
 
 function evidenceW21(w: WebFacts): RawCheck {
   if (!w.present) return webAbsent("W-21");
+  // tomcat은 runsAsRoot가 null일 수 있다(런타임 UID 관찰 불가) — 그 경우 미지정 기본값을 지어내지 않고 "확인 불가"로 기록.
+  const desc = w.runsAsRoot === null ? "확인 불가 (런타임 관찰 필요)" : w.userValue ?? "(미지정 → 기본 비-root)";
   return {
     id: "W-21", source: "docker",
-    evidence: `${w.server} 실행 사용자: ${w.userValue ?? "(미지정 → 기본 비-root)"}`,
+    evidence: `${w.server} 실행 사용자: ${desc}`,
     data: { present: true, runsAsRoot: w.runsAsRoot },
   };
 }

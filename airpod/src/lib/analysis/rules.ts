@@ -1,8 +1,10 @@
 import type { RawCheck, CheckResult, CheckStatus } from "../types";
 import { getCatalogItem } from "../catalog";
 
-// 가이드 기반 룰 평가 (guide_rule_evaluation).
-// RawCheck evidence만 보고 status를 산출한다. Claude는 이 결과를 바꾸지 않는다 (spec §6).
+// 결정론적 룰 평가 (guide_rule_evaluation).
+// 신뢰 경계 개정 이후 최종 판정 주체는 Claude(analysis/claude.ts)이며, 이 모듈은 두 가지
+// 용도로만 쓰인다: (1) skip 판별 — 대상 부재는 보안 판단이 아니라 evidence 존재 여부의
+// 사실이므로 항상 결정론적으로 유지, (2) Claude 호출 불가/실패 시의 결정론적 폴백 판정.
 // 원칙: 명확한 evidence가 있으면 review보다 pass/fail 우선, 대상 부재는 skip.
 
 export function evaluate(raw: RawCheck): CheckResult {
@@ -127,9 +129,12 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
     case "W-09":
       if (d.present === false) return "skip";
       return d.hasCustomErrorPage ? "pass" : "fail";
-    case "W-21":
+    case "W-21": {
       if (d.present === false) return "skip";
-      return d.runsAsRoot ? "fail" : "pass";
+      const runsAsRoot = (d.runsAsRoot as boolean | null) ?? null;
+      if (runsAsRoot === null) return "review"; // tomcat: 런타임 UID 관찰 불가
+      return runsAsRoot ? "fail" : "pass";
+    }
     case "W-22": {
       if (d.present === false) return "skip";
       const owner = (d.owner as string) ?? "";
