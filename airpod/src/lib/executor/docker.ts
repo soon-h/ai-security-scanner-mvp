@@ -92,28 +92,59 @@ export class DockerExecutor implements RuntimeExecutor {
   }
 
   async detectWebServer(handle: RunHandle): Promise<WebServerInfo | null> {
+    const id = handle.containerId;
+
+    // nginx 우선 탐지
     let hasNginx = false;
     try {
-      const which = await docker(["exec", handle.containerId, "sh", "-c", "command -v nginx || true"]);
+      const which = await docker(["exec", id, "sh", "-c", "command -v nginx || true"]);
       hasNginx = which.trim().length > 0;
     } catch {
       return null;
     }
-    if (!hasNginx) return null;
-
-    const configPath = "/etc/nginx/nginx.conf";
-    let configText = "";
-    try {
-      // nginx -T: include까지 병합된 전체 설정을 덤프한다.
-      configText = await docker(["exec", handle.containerId, "nginx", "-T"], 20_000);
-    } catch {
+    if (hasNginx) {
+      const configPath = "/etc/nginx/nginx.conf";
+      let configText = "";
       try {
-        configText = await docker(["exec", handle.containerId, "cat", configPath]);
+        // nginx -T: include까지 병합된 전체 설정을 덤프한다.
+        configText = await docker(["exec", id, "nginx", "-T"], 20_000);
       } catch {
-        configText = "";
+        try {
+          configText = await docker(["exec", id, "cat", configPath]);
+        } catch {
+          configText = "";
+        }
       }
+      return { kind: "nginx", configText, configPath };
     }
-    return { kind: "nginx", configText, configPath };
+
+    // apache httpd 탐지 (httpd / apache2)
+    let hasApache = false;
+    try {
+      const which = await docker(["exec", id, "sh", "-c", "command -v httpd || command -v apache2 || true"]);
+      hasApache = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (hasApache) {
+      // apache는 nginx -T 같은 병합 덤프가 없어 주 설정 파일을 읽는다 (배포판별 경로 후보).
+      const candidates = [
+        "/usr/local/apache2/conf/httpd.conf",
+        "/etc/apache2/apache2.conf",
+        "/etc/httpd/conf/httpd.conf",
+      ];
+      for (const p of candidates) {
+        try {
+          const text = await docker(["exec", id, "cat", p]);
+          if (text.trim().length > 0) return { kind: "apache", configText: text, configPath: p };
+        } catch {
+          // 다음 후보
+        }
+      }
+      return { kind: "apache", configText: "", configPath: candidates[0] };
+    }
+
+    return null;
   }
 
   async listeningPorts(handle: RunHandle): Promise<number[] | null> {

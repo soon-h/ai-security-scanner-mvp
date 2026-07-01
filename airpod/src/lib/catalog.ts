@@ -132,14 +132,14 @@ export const CATALOG: CatalogItem[] = [
     method: "R",
     failCriterion: "others 쓰기 권한(world-writable) 파일 존재",
   },
-  // Slice 4 — 웹 서비스 축 (KISA W 항목을 nginx 설정에 매핑; nginx 미탐지 시 skip)
+  // 웹 서비스 축 (Slice 4: nginx / Slice 5: apache). KISA W 항목을 웹서버 설정에 매핑; 웹서버 미탐지 시 skip.
   {
     id: "W-01",
     category: "web",
     title: "디렉토리 리스팅 제거",
     severity: "High",
     method: "R",
-    failCriterion: "nginx autoindex on 설정 존재",
+    failCriterion: "디렉토리 자동 인덱싱(autoindex on / Options Indexes) 활성",
   },
   {
     id: "W-08",
@@ -147,7 +147,7 @@ export const CATALOG: CatalogItem[] = [
     title: "웹서비스 로그 설정",
     severity: "High",
     method: "R",
-    failCriterion: "access_log 미설정 또는 off",
+    failCriterion: "접근 로그(access_log / CustomLog) 미설정",
   },
   {
     id: "W-09",
@@ -155,7 +155,7 @@ export const CATALOG: CatalogItem[] = [
     title: "웹서버 에러 메시지 통제",
     severity: "High",
     method: "R",
-    failCriterion: "custom error_page 미설정 (기본 에러페이지가 서버 정보 노출)",
+    failCriterion: "사용자 정의 에러 페이지(error_page / ErrorDocument) 미설정",
   },
   {
     id: "W-21",
@@ -163,7 +163,7 @@ export const CATALOG: CatalogItem[] = [
     title: "웹서버 서비스 데몬 실행 권한 제한",
     severity: "High",
     method: "R",
-    failCriterion: "nginx user 지시어가 root",
+    failCriterion: "웹서버 실행 계정(user / User)이 root",
   },
   {
     id: "W-22",
@@ -171,7 +171,7 @@ export const CATALOG: CatalogItem[] = [
     title: "웹 서비스 환경설정 파일 보호",
     severity: "High",
     method: "R",
-    failCriterion: "nginx.conf 소유자 root 아님 또는 그룹/기타 쓰기 권한",
+    failCriterion: "웹서버 설정 파일 소유자 root 아님 또는 그룹/기타 쓰기 권한",
   },
   {
     id: "W-25",
@@ -179,7 +179,7 @@ export const CATALOG: CatalogItem[] = [
     title: "불필요한 HTTP Method 제한",
     severity: "High",
     method: "R",
-    failCriterion: "dav_methods로 PUT/DELETE 등 위험 메서드 허용",
+    failCriterion: "위험 HTTP Method(PUT/DELETE/TRACE 등) 허용",
   },
   {
     id: "W-26",
@@ -187,7 +187,7 @@ export const CATALOG: CatalogItem[] = [
     title: "웹서비스 헤더 정보 노출 제한",
     severity: "High",
     method: "R",
-    failCriterion: "server_tokens off 미설정 (버전 정보 노출)",
+    failCriterion: "서버 버전 정보 노출(server_tokens on / ServerTokens Full)",
   },
 ];
 

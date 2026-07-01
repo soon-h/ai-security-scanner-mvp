@@ -22,6 +22,30 @@ export const SAFE_DOCKERFILE = [
   'CMD ["sleep", "300"]',
 ].join("\n");
 
+// Apache httpd 설정 픽스처 (Slice 5)
+export const VULN_APACHE = [
+  "User root",
+  '<Directory "/usr/local/apache2/htdocs">',
+  "  Options Indexes FollowSymLinks",
+  "</Directory>",
+  "TraceEnable On",
+].join("\n"); // CustomLog/ErrorDocument/ServerTokens Prod/ServerSignature Off 없음
+
+export const SAFE_APACHE = [
+  "User www-data",
+  "ServerTokens Prod",
+  "ServerSignature Off",
+  "TraceEnable Off",
+  "ErrorDocument 404 /404.html",
+  "CustomLog /var/log/apache2/access.log combined",
+  '<Directory "/usr/local/apache2/htdocs">',
+  "  Options -Indexes FollowSymLinks",
+  "  <LimitExcept GET POST>",
+  "    Require all denied",
+  "  </LimitExcept>",
+  "</Directory>",
+].join("\n");
+
 export function makeScan(id: string, repoUrl = "https://example.com/repo.git"): ScanRecord {
   const now = new Date().toISOString();
   return {

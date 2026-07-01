@@ -5,7 +5,7 @@ import { evaluateAll } from "../src/lib/analysis/rules";
 import type { RunHandle } from "../src/lib/executor/types";
 import type { CheckStatus } from "../src/lib/types";
 import { FakeExecutor, vulnerableOptions, safeOptions } from "./helpers/fakes";
-import { VULN_DOCKERFILE, SAFE_DOCKERFILE } from "./helpers/fixtures";
+import { VULN_DOCKERFILE, SAFE_DOCKERFILE, VULN_APACHE, SAFE_APACHE } from "./helpers/fixtures";
 
 const HANDLE: RunHandle = { containerId: "c", imageRef: "i" };
 
@@ -57,6 +57,28 @@ test("C-01: observed runtime UID overrides the static USER directive", async () 
   // USER app 지시어가 있어도 런타임 uid=0이면 취약 (런타임이 ground truth)
   const rootAtRuntime = await statusMap("FROM x\nUSER app", new FakeExecutor({ runtimeUid: 0 }), HANDLE);
   assert.equal(rootAtRuntime.get("C-01"), "fail");
+});
+
+test("apache web server: same W items map to Apache config (vulnerable → fail)", async () => {
+  const exec = new FakeExecutor({
+    webServer: { kind: "apache", configPath: "/usr/local/apache2/conf/httpd.conf", configText: VULN_APACHE },
+    fileStats: { "/usr/local/apache2/conf/httpd.conf": { path: "x", owner: "root", group: "root", mode: "666" } },
+  });
+  const m = await statusMap(null, exec, HANDLE);
+  for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
+    assert.equal(m.get(id), "fail", `${id} should fail on vulnerable apache`);
+  }
+});
+
+test("apache web server: hardened config passes all W items", async () => {
+  const exec = new FakeExecutor({
+    webServer: { kind: "apache", configPath: "/usr/local/apache2/conf/httpd.conf", configText: SAFE_APACHE },
+    fileStats: { "/usr/local/apache2/conf/httpd.conf": { path: "x", owner: "root", group: "root", mode: "644" } },
+  });
+  const m = await statusMap(null, exec, HANDLE);
+  for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
+    assert.equal(m.get(id), "pass", `${id} should pass on hardened apache`);
+  }
 });
 
 test("source is propagated from the executor into results", async () => {

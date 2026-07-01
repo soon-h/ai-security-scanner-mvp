@@ -117,19 +117,19 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
       const count = (d.count as number) ?? 0;
       return count > 0 ? "fail" : "pass";
     }
-    // 웹 항목: 웹서버 미탐지(present=false) → skip (해당 없음)
+    // 웹 항목: 웹서버 미탐지(present=false) → skip (해당 없음). nginx/apache 공통(정규화된 WebFacts).
     case "W-01":
       if (d.present === false) return "skip";
-      return d.autoindexOn ? "fail" : "pass";
+      return d.directoryListingOn ? "fail" : "pass";
     case "W-08":
       if (d.present === false) return "skip";
       return d.hasAccessLog ? "pass" : "fail";
     case "W-09":
       if (d.present === false) return "skip";
-      return d.hasErrorPage ? "pass" : "fail";
+      return d.hasCustomErrorPage ? "pass" : "fail";
     case "W-21":
       if (d.present === false) return "skip";
-      return d.isRoot ? "fail" : "pass";
+      return d.runsAsRoot ? "fail" : "pass";
     case "W-22": {
       if (d.present === false) return "skip";
       const owner = (d.owner as string) ?? "";
@@ -139,12 +139,12 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
     }
     case "W-25":
       if (d.present === false) return "skip";
-      if (d.riskyDavMethods) return "fail"; // 위험 메서드 명시적 허용
-      if (d.hasMethodRestriction) return "pass"; // 메서드 제한 설정 존재
+      if (d.riskyMethods) return "fail"; // 위험 메서드 명시적 허용
+      if (d.methodRestricted) return "pass"; // 메서드 제한 설정 존재
       return "review"; // 명시적 제한 없음 — 기본값이라 단정 불가
     case "W-26":
       if (d.present === false) return "skip";
-      return d.serverTokensOff ? "pass" : "fail";
+      return d.versionExposed ? "fail" : "pass";
     default:
       return "review";
   }

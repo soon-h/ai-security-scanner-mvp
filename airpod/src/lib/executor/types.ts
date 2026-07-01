@@ -65,7 +65,7 @@ export interface FileStat {
 }
 
 export interface WebServerInfo {
-  kind: "nginx";
-  configText: string; // `nginx -T` 병합 설정 (실패 시 메인 conf)
+  kind: "nginx" | "apache";
+  configText: string; // nginx: `nginx -T` 병합 설정 / apache: 주 설정 파일
   configPath: string; // 주 설정 파일 경로 (권한 점검용)
 }
