@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { RuntimeExecutor, BuildResult, RunHandle, FileStat } from "./types";
+import type { RuntimeExecutor, BuildResult, RunHandle, FileStat, WebServerInfo } from "./types";
 
 const pexec = promisify(execFile);
 
@@ -89,6 +89,31 @@ export class DockerExecutor implements RuntimeExecutor {
     } catch {
       return null;
     }
+  }
+
+  async detectWebServer(handle: RunHandle): Promise<WebServerInfo | null> {
+    let hasNginx = false;
+    try {
+      const which = await docker(["exec", handle.containerId, "sh", "-c", "command -v nginx || true"]);
+      hasNginx = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (!hasNginx) return null;
+
+    const configPath = "/etc/nginx/nginx.conf";
+    let configText = "";
+    try {
+      // nginx -T: include까지 병합된 전체 설정을 덤프한다.
+      configText = await docker(["exec", handle.containerId, "nginx", "-T"], 20_000);
+    } catch {
+      try {
+        configText = await docker(["exec", handle.containerId, "cat", configPath]);
+      } catch {
+        configText = "";
+      }
+    }
+    return { kind: "nginx", configText, configPath };
   }
 
   async listeningPorts(handle: RunHandle): Promise<number[] | null> {

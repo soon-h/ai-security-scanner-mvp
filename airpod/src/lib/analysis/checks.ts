@@ -1,6 +1,7 @@
 import type { RawCheck } from "../types";
-import type { RuntimeExecutor, RunHandle } from "../executor/types";
+import type { RuntimeExecutor, RunHandle, WebServerInfo } from "../executor/types";
 import { analyzeDockerfile, type DockerfileFacts } from "./dockerfile";
+import { analyzeNginx, type NginxFacts } from "./nginx";
 
 // Ansible evidence 수집 단계에 해당한다 (spec 신뢰 경계의 첫 단계).
 // Dockerfile 정적 분석(D) + executor 기반 런타임 점검(R)으로 원시 evidence를 만든다.
@@ -44,6 +45,17 @@ export async function collectEvidence(
   checks.push(await evidenceFilePerm("U-19", "/etc/hosts", executor, handle));
   checks.push(await evidenceFilePerm("U-22", "/etc/services", executor, handle));
   checks.push(await evidenceU25(executor, handle));
+
+  // 웹 서비스 축 (Slice 4) — nginx 설정 기반. 웹서버 미탐지 시 전부 skip.
+  const web = handle ? await executor.detectWebServer(handle) : null;
+  const nginx = analyzeNginx(web?.configText ?? null);
+  checks.push(evidenceW01(nginx));
+  checks.push(evidenceW08(nginx));
+  checks.push(evidenceW09(nginx));
+  checks.push(evidenceW21(nginx));
+  checks.push(await evidenceW22(web, executor, handle));
+  checks.push(evidenceW25(nginx));
+  checks.push(evidenceW26(nginx));
 
   return checks;
 }
@@ -276,5 +288,83 @@ async function evidenceU25(executor: RuntimeExecutor, handle: RunHandle | null):
     source: executor.source,
     evidence: files.length > 0 ? `world-writable 파일 ${files.length}건: ${sample}${files.length > 5 ? " ..." : ""}` : "world-writable 파일 없음",
     data: { observed: true, count: files.length, sample: files.slice(0, 10) },
+  };
+}
+
+// W 항목 공통: 웹서버(nginx) 미탐지 시 skip evidence.
+function webAbsent(id: string): RawCheck {
+  return { id, source: "docker", evidence: "웹서버(nginx) 미탐지 — 대상 아님", data: { present: false } };
+}
+
+function evidenceW01(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-01");
+  return {
+    id: "W-01", source: "docker",
+    evidence: n.autoindexOn ? "autoindex on — 디렉토리 리스팅 활성" : "디렉토리 리스팅(autoindex on) 미설정",
+    data: { present: true, autoindexOn: n.autoindexOn },
+  };
+}
+
+function evidenceW08(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-08");
+  return {
+    id: "W-08", source: "docker",
+    evidence: n.hasAccessLog ? "access_log 설정됨" : n.accessLogDisabled ? "access_log off — 로그 비활성" : "access_log 미설정",
+    data: { present: true, hasAccessLog: n.hasAccessLog },
+  };
+}
+
+function evidenceW09(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-09");
+  return {
+    id: "W-09", source: "docker",
+    evidence: n.hasErrorPage ? "custom error_page 설정됨" : "custom error_page 미설정 — 기본 에러페이지가 서버 정보 노출",
+    data: { present: true, hasErrorPage: n.hasErrorPage },
+  };
+}
+
+function evidenceW21(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-21");
+  const u = n.userDirective;
+  const isRoot = u === "root";
+  return {
+    id: "W-21", source: "docker",
+    evidence: `nginx user 지시어: ${u ?? "(미지정 → 기본 nobody)"}`,
+    data: { present: true, userDirective: u, isRoot },
+  };
+}
+
+async function evidenceW22(web: WebServerInfo | null, executor: RuntimeExecutor, handle: RunHandle | null): Promise<RawCheck> {
+  if (!web || !handle) return webAbsent("W-22");
+  const stat = await executor.statFile(handle, web.configPath);
+  if (!stat) {
+    return { id: "W-22", source: executor.source, evidence: `${web.configPath} 확인 불가`, data: { present: false } };
+  }
+  return {
+    id: "W-22", source: executor.source,
+    evidence: `${web.configPath} 소유자 ${stat.owner}:${stat.group}, 권한 ${stat.mode}`,
+    data: { present: true, owner: stat.owner, group: stat.group, mode: stat.mode },
+  };
+}
+
+function evidenceW25(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-25");
+  let evidence: string;
+  if (n.riskyDavMethods) evidence = "dav_methods로 PUT/DELETE 등 위험 메서드 허용";
+  else if (n.hasMethodRestriction) evidence = "HTTP Method 제한 설정 존재";
+  else evidence = "명시적 Method 제한 없음 (기본 GET/HEAD/POST)";
+  return {
+    id: "W-25", source: "docker",
+    evidence,
+    data: { present: true, riskyDavMethods: n.riskyDavMethods, hasMethodRestriction: n.hasMethodRestriction },
+  };
+}
+
+function evidenceW26(n: NginxFacts): RawCheck {
+  if (!n.present) return webAbsent("W-26");
+  return {
+    id: "W-26", source: "docker",
+    evidence: n.serverTokensOff ? "server_tokens off — 버전 정보 숨김" : "server_tokens off 미설정 — 버전 정보 노출",
+    data: { present: true, serverTokensOff: n.serverTokensOff },
   };
 }

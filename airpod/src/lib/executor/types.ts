@@ -29,6 +29,9 @@ export interface RuntimeExecutor {
   // others 쓰기 권한이 있는 파일 목록 (U-25 R). null=관찰 불가 → review.
   worldWritableFiles(handle: RunHandle): Promise<string[] | null>;
 
+  // 컨테이너 내 웹서버 탐지 및 병합 설정 조회 (W 항목). null=웹서버 없음 → 웹 항목 skip.
+  detectWebServer(handle: RunHandle): Promise<WebServerInfo | null>;
+
   // 실행 컨테이너에서 LISTEN 중인 TCP 포트 (C-03 R). null=관찰 불가 → review.
   listeningPorts(handle: RunHandle): Promise<number[] | null>;
 
@@ -59,4 +62,10 @@ export interface FileStat {
   owner: string; // e.g. "root"
   group: string;
   mode: string; // octal string e.g. "644"
+}
+
+export interface WebServerInfo {
+  kind: "nginx";
+  configText: string; // `nginx -T` 병합 설정 (실패 시 메인 conf)
+  configPath: string; // 주 설정 파일 경로 (권한 점검용)
 }

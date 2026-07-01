@@ -41,7 +41,7 @@ test("happy path: safe repo completes with all stages ok and zero fails", async 
   assert.equal(final.status, "completed");
   assert.equal(final.usedLocalImageFallback, false);
   assert.equal(final.executor, "docker");
-  assert.equal(final.results.length, 16);
+  assert.equal(final.results.length, 23);
   assert.equal(failIds(final).length, 0);
   for (const st of final.stages) assert.equal(st.status, "ok", `stage ${st.id}`);
   assert.match(final.imageRef!, /airpod\/scan-safe1/);

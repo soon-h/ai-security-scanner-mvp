@@ -1,4 +1,4 @@
-import type { RuntimeExecutor, BuildResult, RunHandle, FileStat } from "./types";
+import type { RuntimeExecutor, BuildResult, RunHandle, FileStat, WebServerInfo } from "./types";
 
 // Docker 미설치 환경에서 E2E 파이프라인을 끝까지 돌리기 위한 시뮬레이션 executor.
 // 모든 evidence의 source는 "stub"으로 표기되어 실제 런타임 점검과 구분된다.
@@ -56,6 +56,11 @@ export class StubExecutor implements RuntimeExecutor {
 
   async worldWritableFiles(_handle: RunHandle): Promise<string[] | null> {
     // 실제 파일시스템을 관찰할 수 없다 → null (룰 평가에서 review).
+    return null;
+  }
+
+  async detectWebServer(_handle: RunHandle): Promise<WebServerInfo | null> {
+    // 실제 컨테이너를 관찰할 수 없다 → 웹서버 미탐지로 취급 (W 항목 skip). 취약을 지어내지 않는다.
     return null;
   }
 

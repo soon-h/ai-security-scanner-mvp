@@ -1,4 +1,4 @@
-import type { RuntimeExecutor, RunHandle, BuildResult, FileStat } from "../../src/lib/executor/types";
+import type { RuntimeExecutor, RunHandle, BuildResult, FileStat, WebServerInfo } from "../../src/lib/executor/types";
 import type { EvidenceSource } from "../../src/lib/types";
 
 // 결정적 fake executor. 실제 Docker 없이 원하는 런타임 evidence를 주입해
@@ -15,6 +15,7 @@ export interface FakeOptions {
   worldWritable?: string[] | null;
   passwd?: string | null;
   fileStats?: Record<string, FileStat | null>;
+  webServer?: WebServerInfo | null;
 }
 
 export class FakeExecutor implements RuntimeExecutor {
@@ -48,6 +49,9 @@ export class FakeExecutor implements RuntimeExecutor {
   }
   async worldWritableFiles(): Promise<string[] | null> {
     return this.o.worldWritable ?? null;
+  }
+  async detectWebServer(): Promise<WebServerInfo | null> {
+    return this.o.webServer ?? null;
   }
   async listeningPorts(): Promise<number[] | null> {
     return this.o.listeningPorts ?? null;
@@ -87,6 +91,20 @@ export function vulnerableOptions(): FakeOptions {
       "/etc/shadow": perm("/etc/shadow", "644"), // U-18 fail (others read)
       "/etc/hosts": perm("/etc/hosts", "644"), // U-19 pass
       "/etc/services": perm("/etc/services", "666"), // U-22 fail
+      "/etc/nginx/nginx.conf": perm("/etc/nginx/nginx.conf", "666"), // W-22 fail
+    },
+    webServer: {
+      kind: "nginx",
+      configPath: "/etc/nginx/nginx.conf",
+      configText: [
+        "user root;", // W-21 fail
+        "http {",
+        "  server {",
+        "    location / { autoindex on; }", // W-01 fail
+        "    dav_methods PUT DELETE;", // W-25 fail
+        "  }",
+        "}", // access_log/error_page/server_tokens 없음 → W-08/09/26 fail
+      ].join("\n"),
     },
   };
 }
@@ -109,6 +127,22 @@ export function safeOptions(): FakeOptions {
       "/etc/shadow": perm("/etc/shadow", "640", "root", "shadow"),
       "/etc/hosts": perm("/etc/hosts", "644"),
       "/etc/services": perm("/etc/services", "644"),
+      "/etc/nginx/nginx.conf": perm("/etc/nginx/nginx.conf", "644"),
+    },
+    webServer: {
+      kind: "nginx",
+      configPath: "/etc/nginx/nginx.conf",
+      configText: [
+        "user nginx;",
+        "http {",
+        "  server_tokens off;",
+        "  access_log /var/log/nginx/access.log;",
+        "  error_page 404 /404.html;",
+        "  server {",
+        "    location / { autoindex off; limit_except GET POST { deny all; } }",
+        "  }",
+        "}",
+      ].join("\n"),
     },
   };
 }

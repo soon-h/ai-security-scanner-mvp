@@ -9,6 +9,7 @@ const METHODS = new Set(["D", "R", "D+R"]);
 const EXPECTED_IDS = [
   "C-01", "C-02", "C-03", "C-04", "C-05", "C-06", "C-07", "C-08", "C-09",
   "U-04", "U-05", "U-16", "U-18", "U-19", "U-22", "U-25",
+  "W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26",
 ];
 
 test("catalog ids are unique", () => {

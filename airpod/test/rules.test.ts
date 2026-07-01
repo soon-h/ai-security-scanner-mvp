@@ -17,7 +17,11 @@ async function statusMap(dockerfile: string | null, executor: FakeExecutor, hand
 
 test("vulnerable fixture: every check fails except the well-configured one (U-19)", async () => {
   const m = await statusMap(VULN_DOCKERFILE, new FakeExecutor(vulnerableOptions()), HANDLE);
-  const shouldFail = ["C-01","C-02","C-03","C-04","C-05","C-06","C-07","C-08","C-09","U-04","U-05","U-16","U-18","U-22","U-25"];
+  const shouldFail = [
+    "C-01","C-02","C-03","C-04","C-05","C-06","C-07","C-08","C-09",
+    "U-04","U-05","U-16","U-18","U-22","U-25",
+    "W-01","W-08","W-09","W-21","W-22","W-25","W-26",
+  ];
   for (const id of shouldFail) assert.equal(m.get(id), "fail", `${id} should fail`);
   assert.equal(m.get("U-19"), "pass"); // /etc/hosts 644 = 양호
 });
@@ -36,6 +40,10 @@ test("no runtime observation: unobservable → review/skip, never a fabricated f
   }
   for (const id of ["U-16", "U-18", "U-19", "U-22"]) {
     assert.equal(m.get(id), "skip", `${id} → skip (파일 없음)`);
+  }
+  // 웹서버 미탐지 → 모든 W 항목 skip
+  for (const id of ["W-01", "W-08", "W-09", "W-21", "W-22", "W-25", "W-26"]) {
+    assert.equal(m.get(id), "skip", `${id} → skip (웹서버 없음)`);
   }
   // 정적 근거만으로 판정 가능한 항목은 여전히 pass
   assert.equal(m.get("C-01"), "pass");

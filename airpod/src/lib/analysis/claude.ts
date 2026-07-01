@@ -197,6 +197,41 @@ function stubReport(r: CheckResult, safeEvidence: string, note: string): ClaudeR
       remediation: "불필요한 others 쓰기 권한을 제거하고, 공유가 필요하면 그룹 권한과 sticky bit로 통제한다.",
       example: "chmod o-w <file>   # 필요한 경우 find / -xdev -type f -perm -0002 로 점검",
     },
+    "W-01": {
+      reason: "디렉토리 리스팅이 켜지면 의도치 않은 파일·경로가 노출돼 정보 수집에 악용된다.",
+      remediation: "autoindex를 off로 두고 필요한 경우에만 제한적으로 사용한다.",
+      example: "location / {\n    autoindex off;\n}",
+    },
+    "W-08": {
+      reason: "접근 로그가 없으면 침해 발생 시 추적·대응이 불가능하다.",
+      remediation: "access_log를 활성화하고 로그를 안전한 위치에 보관한다.",
+      example: "access_log /var/log/nginx/access.log;",
+    },
+    "W-09": {
+      reason: "기본 에러 페이지는 서버 종류·버전 등 내부 정보를 노출할 수 있다.",
+      remediation: "error_page로 사용자 정의 오류 페이지를 지정한다.",
+      example: "error_page 404 /404.html;\nerror_page 500 502 503 504 /50x.html;",
+    },
+    "W-21": {
+      reason: "웹서버 워커가 root로 실행되면 취약점 악용 시 피해 범위가 커진다.",
+      remediation: "user 지시어로 비-root 계정(nginx/www-data)으로 실행한다.",
+      example: "user nginx;",
+    },
+    "W-22": {
+      reason: "설정 파일이 과도한 권한이면 공격자가 설정을 변조해 서버를 장악할 수 있다.",
+      remediation: "소유자를 root로, 그룹/기타 쓰기 권한을 제거한다.",
+      example: "chown root:root /etc/nginx/nginx.conf\nchmod 644 /etc/nginx/nginx.conf",
+    },
+    "W-25": {
+      reason: "PUT/DELETE 등 불필요한 HTTP Method 허용은 파일 변조·삭제 공격 표면을 만든다.",
+      remediation: "필요한 메서드만 허용하고 나머지는 차단한다.",
+      example: "location / {\n    limit_except GET POST { deny all; }\n}",
+    },
+    "W-26": {
+      reason: "Server 헤더의 버전 노출은 알려진 취약점 표적화를 쉽게 만든다.",
+      remediation: "server_tokens를 off로 설정해 버전 정보를 숨긴다.",
+      example: "http {\n    server_tokens off;\n}",
+    },
   };
   const base = canned[r.id] ?? {
     reason: "evidence 기반으로 추가 검토가 필요하다.",
