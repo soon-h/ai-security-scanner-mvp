@@ -75,6 +75,23 @@ export const CATALOG: CatalogItem[] = [
     method: "D",
     failCriterion: "COPY 대신 원격 URL ADD 사용",
   },
+  // Slice 3 — 계정/파일권한 축 (KISA U 항목 중 최소 컨테이너에서 관찰 가능한 것 우선)
+  {
+    id: "U-04",
+    category: "unix",
+    title: "비밀번호 파일 보호",
+    severity: "High",
+    method: "R",
+    failCriterion: "/etc/passwd 암호 필드에 shadow(x) 대신 실제 해시 노출",
+  },
+  {
+    id: "U-05",
+    category: "unix",
+    title: "root 이외의 UID가 '0' 금지",
+    severity: "High",
+    method: "R",
+    failCriterion: "root 외 계정의 UID가 0",
+  },
   {
     id: "U-16",
     category: "unix",
@@ -82,6 +99,38 @@ export const CATALOG: CatalogItem[] = [
     severity: "High",
     method: "R",
     failCriterion: "소유자 root 아님 또는 권한이 644 초과",
+  },
+  {
+    id: "U-18",
+    category: "unix",
+    title: "/etc/shadow 파일 소유자 및 권한 설정",
+    severity: "High",
+    method: "R",
+    failCriterion: "소유자 root 아님 또는 그룹 쓰기·기타(others) 권한 존재",
+  },
+  {
+    id: "U-19",
+    category: "unix",
+    title: "/etc/hosts 파일 소유자 및 권한 설정",
+    severity: "High",
+    method: "R",
+    failCriterion: "소유자 root 아님 또는 권한이 644 초과",
+  },
+  {
+    id: "U-22",
+    category: "unix",
+    title: "/etc/services 파일 소유자 및 권한 설정",
+    severity: "High",
+    method: "R",
+    failCriterion: "소유자 root 아님 또는 권한이 644 초과",
+  },
+  {
+    id: "U-25",
+    category: "unix",
+    title: "world writable 파일 점검",
+    severity: "High",
+    method: "R",
+    failCriterion: "others 쓰기 권한(world-writable) 파일 존재",
   },
 ];
 

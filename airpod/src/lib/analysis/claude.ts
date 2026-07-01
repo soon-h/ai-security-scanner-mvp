@@ -162,10 +162,40 @@ function stubReport(r: CheckResult, safeEvidence: string, note: string): ClaudeR
       remediation: "로컬 파일은 COPY를 쓰고, 원격 리소스는 검증 가능한 방식으로 별도 단계에서 받는다.",
       example: "COPY app /app\n# ADD https://... 대신 검증된 다운로드 사용",
     },
+    "U-04": {
+      reason: "암호 해시가 /etc/passwd 에 직접 있으면 누구나 읽어 오프라인 크래킹 대상이 된다.",
+      remediation: "shadow 패스워드를 사용해 해시를 /etc/shadow(제한 권한)로 분리한다.",
+      example: "pwconv   # /etc/passwd 의 해시를 /etc/shadow 로 이관",
+    },
+    "U-05": {
+      reason: "root 외 계정에 UID 0이 있으면 해당 계정이 root와 동일한 전권을 가져 계정 통제가 무너진다.",
+      remediation: "UID 0은 root 계정에만 부여하고, 나머지 계정은 고유한 비-0 UID로 재설정한다.",
+      example: "usermod -u 1001 <account>   # UID 0 중복 계정 교정",
+    },
     "U-16": {
       reason: "/etc/passwd 가 과도한 권한이면 계정 정보 변조·권한 상승 위험이 있다.",
       remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
       example: "chown root:root /etc/passwd\nchmod 644 /etc/passwd",
+    },
+    "U-18": {
+      reason: "/etc/shadow 가 노출되면 암호 해시가 유출돼 크래킹·권한 상승으로 이어진다.",
+      remediation: "소유자를 root 로, 권한을 640 이하(others 권한 제거)로 설정한다.",
+      example: "chown root:shadow /etc/shadow\nchmod 640 /etc/shadow",
+    },
+    "U-19": {
+      reason: "/etc/hosts 를 임의 수정할 수 있으면 이름 해석을 조작해 트래픽을 가로챌 수 있다.",
+      remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
+      example: "chown root:root /etc/hosts\nchmod 644 /etc/hosts",
+    },
+    "U-22": {
+      reason: "/etc/services 를 변조할 수 있으면 포트-서비스 매핑이 왜곡돼 오탐·우회에 악용될 수 있다.",
+      remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
+      example: "chown root:root /etc/services\nchmod 644 /etc/services",
+    },
+    "U-25": {
+      reason: "world-writable 파일은 임의 사용자가 내용을 바꿀 수 있어 변조·권한 상승 경로가 된다.",
+      remediation: "불필요한 others 쓰기 권한을 제거하고, 공유가 필요하면 그룹 권한과 sticky bit로 통제한다.",
+      example: "chmod o-w <file>   # 필요한 경우 find / -xdev -type f -perm -0002 로 점검",
     },
   };
   const base = canned[r.id] ?? {

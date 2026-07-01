@@ -27,10 +27,31 @@ export class StubExecutor implements RuntimeExecutor {
   }
 
   async statFile(_handle: RunHandle, filePath: string): Promise<FileStat | null> {
-    // 일반 base 이미지의 현실적 기본값: /etc/passwd 는 root:root 644 (양호).
+    // 일반 base 이미지의 현실적 기본값(양호). 취약을 지어내지 않는다.
+    const defaults: Record<string, FileStat> = {
+      "/etc/passwd": { path: "/etc/passwd", owner: "root", group: "root", mode: "644" },
+      "/etc/shadow": { path: "/etc/shadow", owner: "root", group: "shadow", mode: "640" },
+      "/etc/hosts": { path: "/etc/hosts", owner: "root", group: "root", mode: "644" },
+      "/etc/services": { path: "/etc/services", owner: "root", group: "root", mode: "644" },
+    };
+    return defaults[filePath] ?? null;
+  }
+
+  async readTextFile(_handle: RunHandle, filePath: string): Promise<string | null> {
+    // 일반 base 이미지의 현실적 기본 /etc/passwd (shadow 사용, UID 0은 root 단독).
     if (filePath === "/etc/passwd") {
-      return { path: filePath, owner: "root", group: "root", mode: "644" };
+      return [
+        "root:x:0:0:root:/root:/bin/bash",
+        "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin",
+        "bin:x:2:2:bin:/bin:/usr/sbin/nologin",
+        "nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin",
+      ].join("\n");
     }
+    return null;
+  }
+
+  async worldWritableFiles(_handle: RunHandle): Promise<string[] | null> {
+    // 실제 파일시스템을 관찰할 수 없다 → null (룰 평가에서 review).
     return null;
   }
 

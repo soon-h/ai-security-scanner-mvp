@@ -60,6 +60,27 @@ export class DockerExecutor implements RuntimeExecutor {
     }
   }
 
+  async readTextFile(handle: RunHandle, filePath: string): Promise<string | null> {
+    try {
+      return await docker(["exec", handle.containerId, "cat", filePath]);
+    } catch {
+      return null;
+    }
+  }
+
+  async worldWritableFiles(handle: RunHandle): Promise<string[] | null> {
+    try {
+      const out = await docker(
+        ["exec", handle.containerId, "sh", "-c",
+          "find / -xdev -type f -perm -0002 2>/dev/null | head -100; true"],
+        60_000,
+      );
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
   async listeningPorts(handle: RunHandle): Promise<number[] | null> {
     // /proc/net/tcp(6) 파싱: st==0A(LISTEN)인 local_address의 포트(hex)를 추출.
     // ss/netstat 부재 환경에서도 동작한다.

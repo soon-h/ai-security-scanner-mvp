@@ -81,15 +81,41 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
       const hitCount = (d.hitCount as number) ?? 0;
       return hitCount > 0 ? "fail" : "pass";
     }
-    case "U-16": {
-      if (d.present === false) return "skip"; // /etc/passwd 없음 또는 미실행
+    case "U-04": {
+      if (d.observed === false) return "review"; // /etc/passwd 읽기 불가
+      const exposed = (d.exposed as string[]) ?? [];
+      return exposed.length > 0 ? "fail" : "pass";
+    }
+    case "U-05": {
+      if (d.observed === false) return "review";
+      const uid0 = (d.uid0 as string[]) ?? [];
+      return uid0.length > 0 ? "fail" : "pass";
+    }
+    // U-16/19/22: root 소유 + 그룹/기타 쓰기 없음 + 644 이하
+    case "U-16":
+    case "U-19":
+    case "U-22": {
+      if (d.present === false) return "skip";
       const owner = (d.owner as string) ?? "";
       const mode = parseInt((d.mode as string) ?? "0", 8);
       const ownerOk = owner === "root";
-      // 그룹/기타 쓰기 권한이 없어야 하고 644 이하여야 함
       const groupOrOtherWritable = (mode & 0o022) !== 0;
       const permOk = !groupOrOtherWritable && mode <= 0o644;
       return ownerOk && permOk ? "pass" : "fail";
+    }
+    case "U-18": {
+      // /etc/shadow는 더 엄격: root 소유 + 그룹 쓰기 없음 + others 어떤 권한도 없음 (640/600/400/000 허용)
+      if (d.present === false) return "skip";
+      const owner = (d.owner as string) ?? "";
+      const mode = parseInt((d.mode as string) ?? "0", 8);
+      const ownerOk = owner === "root";
+      const bad = (mode & 0o020) !== 0 || (mode & 0o007) !== 0;
+      return ownerOk && !bad ? "pass" : "fail";
+    }
+    case "U-25": {
+      if (d.observed === false) return "review";
+      const count = (d.count as number) ?? 0;
+      return count > 0 ? "fail" : "pass";
     }
     default:
       return "review";

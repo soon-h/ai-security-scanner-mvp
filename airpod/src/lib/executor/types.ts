@@ -16,8 +16,14 @@ export interface RuntimeExecutor {
   // 실행 중 컨테이너의 프로세스 UID (C-01 R). null이면 확인 불가 → review.
   inspectRuntimeUid(handle: RunHandle): Promise<number | null>;
 
-  // 컨테이너 내부 파일의 소유자/모드 조회 (U-16 R). 없으면 null → skip.
+  // 컨테이너 내부 파일의 소유자/모드 조회 (U-16/18/19/22 R). 없으면 null → skip.
   statFile(handle: RunHandle, filePath: string): Promise<FileStat | null>;
+
+  // 컨테이너 내부 텍스트 파일 내용 조회 (U-04/U-05: /etc/passwd 파싱). null=읽기 불가 → review.
+  readTextFile(handle: RunHandle, filePath: string): Promise<string | null>;
+
+  // others 쓰기 권한이 있는 파일 목록 (U-25 R). null=관찰 불가 → review.
+  worldWritableFiles(handle: RunHandle): Promise<string[] | null>;
 
   // 실행 컨테이너에서 LISTEN 중인 TCP 포트 (C-03 R). null=관찰 불가 → review.
   listeningPorts(handle: RunHandle): Promise<number[] | null>;

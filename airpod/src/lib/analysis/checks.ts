@@ -36,7 +36,14 @@ export async function collectEvidence(
   checks.push(await evidenceC07(executor, handle));
   checks.push(evidenceC08(facts));
   checks.push(evidenceC09(facts));
+  // 계정/파일권한 축 (Slice 3)
+  checks.push(await evidenceU04(executor, handle));
+  checks.push(await evidenceU05(executor, handle));
   checks.push(await evidenceU16(executor, handle));
+  checks.push(await evidenceFilePerm("U-18", "/etc/shadow", executor, handle));
+  checks.push(await evidenceFilePerm("U-19", "/etc/hosts", executor, handle));
+  checks.push(await evidenceFilePerm("U-22", "/etc/services", executor, handle));
+  checks.push(await evidenceU25(executor, handle));
 
   return checks;
 }
@@ -190,17 +197,84 @@ function evidenceC09(facts: DockerfileFacts): RawCheck {
 }
 
 async function evidenceU16(executor: RuntimeExecutor, handle: RunHandle | null): Promise<RawCheck> {
+  return evidenceFilePerm("U-16", "/etc/passwd", executor, handle);
+}
+
+// U-16/18/19/22 공통: 지정 파일의 소유자·권한을 evidence로 수집한다.
+async function evidenceFilePerm(
+  id: string,
+  filePath: string,
+  executor: RuntimeExecutor,
+  handle: RunHandle | null,
+): Promise<RawCheck> {
   if (!handle) {
-    return { id: "U-16", source: executor.source, evidence: "컨테이너 미실행 — 점검 불가", data: { present: false } };
+    return { id, source: executor.source, evidence: "컨테이너 미실행 — 점검 불가", data: { present: false } };
   }
-  const stat = await executor.statFile(handle, "/etc/passwd");
+  const stat = await executor.statFile(handle, filePath);
   if (!stat) {
-    return { id: "U-16", source: executor.source, evidence: "/etc/passwd 파일 없음 — 대상 아님", data: { present: false } };
+    return { id, source: executor.source, evidence: `${filePath} 파일 없음 — 대상 아님`, data: { present: false } };
   }
   return {
-    id: "U-16",
+    id,
     source: executor.source,
-    evidence: `/etc/passwd 소유자 ${stat.owner}:${stat.group}, 권한 ${stat.mode}`,
+    evidence: `${filePath} 소유자 ${stat.owner}:${stat.group}, 권한 ${stat.mode}`,
     data: { present: true, owner: stat.owner, group: stat.group, mode: stat.mode },
+  };
+}
+
+// U-04: /etc/passwd 암호 필드에 crypt 해시가 직접 노출되면(shadow 미사용) 취약.
+async function evidenceU04(executor: RuntimeExecutor, handle: RunHandle | null): Promise<RawCheck> {
+  const content = handle ? await executor.readTextFile(handle, "/etc/passwd") : null;
+  if (content === null) {
+    return { id: "U-04", source: handle ? executor.source : "static", evidence: "/etc/passwd 읽기 불가 (Docker 필요)", data: { observed: false } };
+  }
+  const exposed: string[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const fields = line.split(":");
+    if (fields.length < 2) continue;
+    if (fields[1].startsWith("$")) exposed.push(fields[0]); // 암호 해시가 passwd에 직접 존재
+  }
+  return {
+    id: "U-04",
+    source: executor.source,
+    evidence: exposed.length > 0 ? `passwd에 암호 해시 노출 계정: ${exposed.join(", ")}` : "암호가 shadow로 분리됨 (passwd 해시 노출 없음)",
+    data: { observed: true, exposed },
+  };
+}
+
+// U-05: root(UID 0) 외 계정에 UID 0이 부여되면 취약.
+async function evidenceU05(executor: RuntimeExecutor, handle: RunHandle | null): Promise<RawCheck> {
+  const content = handle ? await executor.readTextFile(handle, "/etc/passwd") : null;
+  if (content === null) {
+    return { id: "U-05", source: handle ? executor.source : "static", evidence: "/etc/passwd 읽기 불가 (Docker 필요)", data: { observed: false } };
+  }
+  const uid0: string[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const fields = line.split(":");
+    if (fields.length < 3) continue;
+    if (fields[2] === "0" && fields[0] !== "root") uid0.push(fields[0]);
+  }
+  return {
+    id: "U-05",
+    source: executor.source,
+    evidence: uid0.length > 0 ? `root 외 UID 0 계정: ${uid0.join(", ")}` : "UID 0은 root 단독",
+    data: { observed: true, uid0 },
+  };
+}
+
+// U-25: others 쓰기 권한(world-writable) 파일 존재 여부.
+async function evidenceU25(executor: RuntimeExecutor, handle: RunHandle | null): Promise<RawCheck> {
+  const files = handle ? await executor.worldWritableFiles(handle) : null;
+  if (files === null) {
+    return { id: "U-25", source: handle ? executor.source : "static", evidence: "world-writable 파일 관찰 불가 (Docker 필요)", data: { observed: false } };
+  }
+  const sample = files.slice(0, 5).join(", ");
+  return {
+    id: "U-25",
+    source: executor.source,
+    evidence: files.length > 0 ? `world-writable 파일 ${files.length}건: ${sample}${files.length > 5 ? " ..." : ""}` : "world-writable 파일 없음",
+    data: { observed: true, count: files.length, sample: files.slice(0, 10) },
   };
 }
