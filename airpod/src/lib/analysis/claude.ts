@@ -1,67 +1,94 @@
-import type { CheckResult, ClaudeReport } from "../types";
+import type { RawCheck, CheckResult, ClaudeReport, CatalogItem, CheckStatus } from "../types";
+import { getCatalogItem } from "../catalog";
+import { evaluate } from "./rules";
 import { sanitize } from "./sanitize";
 
-// Claude API 분석 (spec §6).
-// Claude는 기준을 만들거나 룰 평가 결과(status)를 바꾸지 않는다. 이미 산출된 evidence/status를
-// 사람이 이해하기 쉬운 설명(reason/remediation/example)으로 바꾸는 역할만 한다.
-// AI 실패는 점검 실패와 분리한다 — 키가 없거나 호출이 실패하면 stub 리포트로 대체한다.
+// Claude 판정 + 설명 (신뢰 경계 개정).
+// Claude가 evidence와 카탈로그 failCriterion을 근거로 pass/fail/review를 직접 판정하고,
+// 그 근거·조치방안·설정 예시를 함께 생성한다. failCriterion 밖의 새 기준은 만들지 않는다.
+// skip(대상 부재)만은 여전히 결정론적으로 처리한다 — 보안 판단이 아니라 evidence 존재
+// 여부의 사실이기 때문이다 (rules.ts).
+// API 키 부재/호출 실패 시에는 rules.ts의 결정론적 판정으로 폴백한다 (AI 실패와 점검 실패 분리).
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-sonnet-5";
 
-// 구조화 출력 강제: tool_use로 스키마를 고정한다 (spec: JSON schema 검증).
+// 구조화 출력 강제: tool_use로 스키마를 고정한다. status는 Claude가 스스로 판정한 값.
 const REPORT_TOOL = {
   name: "emit_report",
-  description: "점검 항목에 대한 사람이 읽기 좋은 보안 리포트를 구조화해 반환한다.",
+  description: "evidence를 근거로 점검 항목의 판정(status)과 사람이 읽기 좋은 보안 리포트를 반환한다.",
   input_schema: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "왜 위험한지(또는 왜 양호한지) 설명" },
+      status: {
+        type: "string",
+        enum: ["pass", "fail", "review"],
+        description:
+          "evidence와 failCriterion만 근거로 스스로 판정한 결과. 명확한 근거가 있으면 review보다 pass/fail을 우선하고, 근거가 불충분·환경 의존적일 때만 review.",
+      },
+      reason: { type: "string", description: "왜 그 판정인지(위험 이유 또는 양호 이유) 설명" },
       remediation: { type: "string", description: "구체적 조치 방안" },
       example: { type: "string", description: "설정/코드 예시" },
     },
-    required: ["reason", "remediation", "example"],
+    required: ["status", "reason", "remediation", "example"],
   },
 } as const;
 
-export async function analyzeResults(results: CheckResult[]): Promise<CheckResult[]> {
-  // fail/review 항목만 Claude 설명 대상 (spec §3 F4)
+export async function judgeAll(raws: RawCheck[]): Promise<CheckResult[]> {
   const out: CheckResult[] = [];
-  for (const r of results) {
-    if (r.status === "fail" || r.status === "review") {
-      r.claude = await analyzeOne(r);
-    }
-    out.push(r);
+  for (const raw of raws) {
+    out.push(await judgeRaw(raw));
   }
   return out;
 }
 
-async function analyzeOne(r: CheckResult): Promise<ClaudeReport> {
+async function judgeRaw(raw: RawCheck): Promise<CheckResult> {
+  const item = getCatalogItem(raw.id);
+  const ruleResult = evaluate(raw);
+  // skip은 AI 판정 대상이 아니다 — 대상 부재는 evidence 존재 여부의 사실.
+  if (ruleResult.status === "skip") return ruleResult;
+
+  const claude = await judgeOne(raw, item, ruleResult.status);
+  return {
+    id: item.id,
+    category: item.category,
+    title: item.title,
+    severity: item.severity,
+    method: item.method,
+    status: claude.status,
+    source: raw.source,
+    evidence: raw.evidence,
+    claude,
+  };
+}
+
+async function judgeOne(raw: RawCheck, item: CatalogItem, fallbackStatus: CheckStatus): Promise<ClaudeReport> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
 
   // Claude 입력은 반드시 sanitize한다.
-  const safeEvidence = sanitize(r.evidence).text;
+  const safeEvidence = sanitize(raw.evidence).text;
 
   if (!apiKey) {
-    return stubReport(r, safeEvidence, "ANTHROPIC_API_KEY 미설정 — Claude 분석을 stub로 대체");
+    return stubReport(item, fallbackStatus, safeEvidence, "ANTHROPIC_API_KEY 미설정 — 결정론적 판정으로 대체");
   }
 
   const system =
-    "너는 컨테이너 보안 점검 리포트를 작성하는 도우미다. " +
-    "이미 산출된 점검 status(pass/fail/review)와 evidence는 절대 바꾸지 마라. " +
-    "새 보안 기준을 만들지 말고, 주어진 evidence를 해석해 위험 이유·조치방안·설정 예시만 제시하라. " +
+    "너는 컨테이너 보안 점검 결과를 판정하는 보안 담당자다. " +
+    "주어진 evidence와 failCriterion만 근거로 이 항목이 pass(양호)/fail(취약)/review(검토) 중 무엇인지 스스로 판정하라. " +
+    "명확한 evidence가 있으면 review보다 pass/fail을 우선하고, evidence가 불충분하거나 환경 의존적일 때만 review로 판정하라. " +
+    "failCriterion 밖의 새로운 보안 기준을 만들지 마라. " +
+    "판정 근거·위험 이유(또는 양호 이유)·조치방안·설정 예시를 함께 제시하라. " +
     "반드시 emit_report 도구로만 답하라.";
 
   const userPayload = sanitize(
     JSON.stringify({
-      id: r.id,
-      title: r.title,
-      status: r.status,
-      severity: r.severity,
+      id: item.id,
+      title: item.title,
+      severity: item.severity,
+      failCriterion: item.failCriterion,
       evidence: safeEvidence,
-      failCriterion: r.method,
     }),
   ).text;
 
@@ -79,13 +106,13 @@ async function analyzeOne(r: CheckResult): Promise<ClaudeReport> {
         system,
         tools: [REPORT_TOOL],
         tool_choice: { type: "tool", name: "emit_report" },
-        messages: [{ role: "user", content: `다음 점검 결과를 설명하라:\n${userPayload}` }],
+        messages: [{ role: "user", content: `다음 점검 항목을 evidence만 근거로 판정하라:\n${userPayload}` }],
       }),
     });
 
     if (!resp.ok) {
       const body = await resp.text();
-      return stubReport(r, safeEvidence, `Claude API 오류 ${resp.status}: ${body.slice(0, 200)}`);
+      return stubReport(item, fallbackStatus, safeEvidence, `Claude API 오류 ${resp.status}: ${body.slice(0, 200)}`);
     }
 
     const json = (await resp.json()) as {
@@ -93,16 +120,18 @@ async function analyzeOne(r: CheckResult): Promise<ClaudeReport> {
     };
     const toolUse = json.content.find((c) => c.type === "tool_use" && c.name === "emit_report");
     const input = toolUse?.input;
-    if (!input?.reason) {
-      return stubReport(r, safeEvidence, "Claude 응답에 유효한 리포트 없음");
+    if (!input?.reason || !input?.status) {
+      return stubReport(item, fallbackStatus, safeEvidence, "Claude 응답에 유효한 판정 없음");
+    }
+    if (input.status !== "pass" && input.status !== "fail" && input.status !== "review") {
+      return stubReport(item, fallbackStatus, safeEvidence, `Claude가 알 수 없는 status 반환: ${input.status}`);
     }
 
-    // status/severity/title/evidence는 룰 평가 결과를 그대로 유지한다(Claude가 못 바꾸게).
     return {
-      id: r.id,
-      status: r.status,
-      severity: r.severity,
-      title: r.title,
+      id: item.id,
+      status: input.status,
+      severity: item.severity,
+      title: item.title,
       evidence: safeEvidence,
       reason: input.reason,
       remediation: input.remediation ?? "",
@@ -110,12 +139,12 @@ async function analyzeOne(r: CheckResult): Promise<ClaudeReport> {
       generatedBy: "claude",
     };
   } catch (err) {
-    return stubReport(r, safeEvidence, `Claude 호출 실패: ${(err as Error).message}`);
+    return stubReport(item, fallbackStatus, safeEvidence, `Claude 호출 실패: ${(err as Error).message}`);
   }
 }
 
-// 키 부재/실패 시 사용하는 결정적 stub 리포트. 항목별 기본 설명을 제공한다.
-function stubReport(r: CheckResult, safeEvidence: string, note: string): ClaudeReport {
+// 키 부재/실패 시 사용하는 결정적 stub 리포트. status는 rules.ts의 폴백 판정을 그대로 쓴다.
+function stubReport(item: CatalogItem, status: CheckStatus, safeEvidence: string, note: string): ClaudeReport {
   const canned: Record<string, { reason: string; remediation: string; example: string }> = {
     "C-01": {
       reason: "root 권한으로 실행되는 컨테이너는 침해 시 호스트 자원 접근 위험을 키운다.",
@@ -233,16 +262,16 @@ function stubReport(r: CheckResult, safeEvidence: string, note: string): ClaudeR
       example: "http {\n    server_tokens off;\n}",
     },
   };
-  const base = canned[r.id] ?? {
+  const base = canned[item.id] ?? {
     reason: "evidence 기반으로 추가 검토가 필요하다.",
     remediation: "가이드 기준에 맞게 설정을 조정한다.",
     example: "",
   };
   return {
-    id: r.id,
-    status: r.status,
-    severity: r.severity,
-    title: r.title,
+    id: item.id,
+    status,
+    severity: item.severity,
+    title: item.title,
     evidence: safeEvidence,
     reason: `${base.reason}\n\n(참고: ${note})`,
     remediation: base.remediation,

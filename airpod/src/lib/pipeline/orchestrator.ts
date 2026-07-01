@@ -1,12 +1,11 @@
 import path from "node:path";
-import type { ScanRecord, StageId, StageState, CheckResult } from "../types";
+import type { ScanRecord, StageId, StageState, RawCheck, CheckResult } from "../types";
 import { saveScan as defaultSaveScan } from "../store";
 import { pickExecutor as defaultPickExecutor } from "../executor";
 import type { RuntimeExecutor, RunHandle } from "../executor/types";
 import { cloneRepo as defaultCloneRepo, cleanupWorkdir as defaultCleanupWorkdir, type CloneResult } from "./repo";
 import { collectEvidence } from "../analysis/checks";
-import { evaluateAll } from "../analysis/rules";
-import { analyzeResults as defaultAnalyzeResults } from "../analysis/claude";
+import { judgeAll as defaultJudgeResults } from "../analysis/claude";
 
 const FALLBACK_IMAGE = "airpod/fallback:local";
 // fallback 이미지 빌드 컨텍스트. 앱 루트(process.cwd())의 fallback/ 디렉터리에 Dockerfile이 있다.
@@ -17,7 +16,7 @@ export interface PipelineDeps {
   pickExecutor: () => Promise<RuntimeExecutor>;
   cloneRepo: (repoUrl: string) => Promise<CloneResult>;
   cleanupWorkdir: (workdir: string) => Promise<void>;
-  analyzeResults: (results: CheckResult[]) => Promise<CheckResult[]>;
+  judgeResults: (raws: RawCheck[]) => Promise<CheckResult[]>;
   saveScan: (scan: ScanRecord) => Promise<void>;
 }
 
@@ -25,7 +24,7 @@ const defaultDeps: PipelineDeps = {
   pickExecutor: defaultPickExecutor,
   cloneRepo: defaultCloneRepo,
   cleanupWorkdir: defaultCleanupWorkdir,
-  analyzeResults: defaultAnalyzeResults,
+  judgeResults: defaultJudgeResults,
   saveScan: defaultSaveScan,
 };
 
@@ -35,8 +34,7 @@ export function initialStages(): StageState[] {
     { id: "build", label: "Build" },
     { id: "sandbox", label: "Sandbox 실행" },
     { id: "ansible", label: "Ansible 점검" },
-    { id: "rule_eval", label: "가이드 기반 룰 평가" },
-    { id: "claude", label: "Claude 분석" },
+    { id: "claude", label: "AI 판정 및 설명" },
     { id: "done", label: "완료" },
   ];
   return defs.map((d) => ({ id: d.id, label: d.label, status: "pending" }));
@@ -131,21 +129,15 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     const raws = await collectEvidence(clone?.dockerfileContent ?? null, executor, handle);
     await finish("ansible", "ok", `${raws.length}개 항목 evidence 수집 (source=${executor.source})`);
 
-    // 5. 가이드 기반 룰 평가
-    await begin("rule_eval");
-    let results = evaluateAll(raws);
+    // 5. AI 판정 및 설명 (AI 실패는 점검 실패와 분리 — 실패 시 결정론적 폴백 판정 사용)
+    await begin("claude");
+    const results = await deps.judgeResults(raws);
     scan.results = results;
     const failCount = results.filter((r) => r.status === "fail").length;
-    await finish("rule_eval", "ok", `fail ${failCount}건 / 전체 ${results.length}건`);
+    const stubCount = results.filter((r) => r.claude?.generatedBy === "stub").length;
+    await finish("claude", "ok", `취약 ${failCount}건 / 전체 ${results.length}건 (폴백 판정 ${stubCount}건)`);
 
-    // 6. Claude 분석 (AI 실패는 점검 실패와 분리)
-    await begin("claude");
-    results = await deps.analyzeResults(results);
-    scan.results = results;
-    const aiCount = results.filter((r) => r.claude).length;
-    await finish("claude", "ok", `${aiCount}개 항목 리포트 생성`);
-
-    // 7. 완료
+    // 6. 완료
     await begin("done");
     await finish("done", "ok");
     scan.status = "completed";

@@ -30,7 +30,8 @@ export interface RawCheck {
   data?: Record<string, unknown>;
 }
 
-// 가이드 기반 룰 평가 결과 (guide_rule_evaluation)
+// 점검 항목의 최종 판정 결과. status는 Claude가 evidence 기반으로 직접 판정한 값이며
+// (AI 실패/키 부재 시 결정론적 폴백), skip만은 항상 결정론적으로 결정된다.
 export interface CheckResult {
   id: string;
   category: CheckCategory;
@@ -40,7 +41,7 @@ export interface CheckResult {
   status: CheckStatus;
   source: EvidenceSource;
   evidence: string;
-  // Claude 설명 (실패/검토 항목에만 채워질 수 있음). AI 실패와 점검 실패는 분리한다.
+  // skip이 아닌 모든 항목에 채워진다 (판정 근거 + 설명). AI 실패와 점검 실패는 분리한다.
   claude?: ClaudeReport | null;
 }
 
@@ -63,7 +64,6 @@ export type StageId =
   | "build"
   | "sandbox"
   | "ansible"
-  | "rule_eval"
   | "claude"
   | "done";
 

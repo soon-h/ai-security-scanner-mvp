@@ -7,6 +7,7 @@ delete process.env.ANTHROPIC_API_KEY;
 import { runPipeline, type PipelineDeps } from "../src/lib/pipeline/orchestrator";
 import type { RuntimeExecutor } from "../src/lib/executor/types";
 import type { ScanRecord } from "../src/lib/types";
+import { getCatalogItem } from "../src/lib/catalog";
 import { FakeExecutor, vulnerableOptions, safeOptions } from "./helpers/fakes";
 import { makeScan, memStore, VULN_DOCKERFILE, SAFE_DOCKERFILE } from "./helpers/fixtures";
 import { VULN_TOKEN } from "./helpers/fixtures";
@@ -58,11 +59,43 @@ test("vulnerable repo: expected fails detected and Claude reports attached", asy
   for (const id of ["C-01", "C-02", "C-05", "U-05", "U-25"]) {
     assert.ok(failIds(final).includes(id), `expected ${id} to fail`);
   }
-  // fail 항목에는 Claude 설명이 붙는다 (AI 실패와 점검 실패는 분리; 여기선 stub)
-  for (const r of final.results.filter((x) => x.status === "fail")) {
+  // skip이 아닌 모든 항목에 판정+설명이 붙는다 (AI가 이제 판정도 하므로; 여기선 키 없어 stub 폴백)
+  for (const r of final.results.filter((x) => x.status !== "skip")) {
     assert.ok(r.claude, `${r.id} should have a report`);
     assert.equal(r.claude!.generatedBy, "stub");
   }
+});
+
+test("AI judgement is authoritative: orchestrator uses judgeResults' status as-is, not a recomputed rule", async () => {
+  const store = memStore();
+  const scan = makeScan("ai1");
+  // vulnerableOptions()는 rule engine이라면 C-01을 fail로 판정할 evidence(runtimeUid=0)를 만든다.
+  const exec = new FakeExecutor(vulnerableOptions());
+  await runPipeline(scan, {
+    ...deps(exec, VULN_DOCKERFILE, store),
+    judgeResults: async (raws) =>
+      raws.map((r) => {
+        const item = getCatalogItem(r.id);
+        return {
+          id: item.id,
+          category: item.category,
+          title: item.title,
+          severity: item.severity,
+          method: item.method,
+          status: r.id === "C-01" ? "review" : "pass",
+          source: r.source,
+          evidence: r.evidence,
+          claude: null,
+        };
+      }),
+  });
+
+  const final = store.get("ai1")!;
+  assert.equal(final.results.find((r) => r.id === "C-01")!.status, "review", "orchestrator must trust the injected AI status, not recompute it");
+  assert.ok(
+    final.results.filter((r) => r.id !== "C-01").every((r) => r.status === "pass"),
+    "non-overridden items should also reflect the injected judgeResults output",
+  );
 });
 
 test("PAT never leaks into the persisted scan record", async () => {

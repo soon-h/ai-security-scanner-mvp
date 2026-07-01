@@ -43,7 +43,7 @@ export default function Home() {
       <div className="panel">
         <h1>컨테이너 보안 점검 시작</h1>
         <p className="muted small">
-          GitHub 레포 URL을 넣으면 Clone → Build → Sandbox → Ansible 점검 → 가이드 기반 룰 평가 → Claude 분석까지 자동으로 한 바퀴 돕니다.
+          GitHub 레포 URL을 넣으면 Clone → Build → Sandbox → Ansible 점검 → AI 판정·설명까지 자동으로 한 바퀴 돕니다.
         </p>
         <div className="row" style={{ marginTop: 12 }}>
           <div className="grow">

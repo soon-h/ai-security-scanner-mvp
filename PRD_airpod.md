@@ -24,7 +24,7 @@
 보안 담당자가 Web Dashboard에서 Repository URL·Branch·GitHub PAT를 입력하고 점검 대상 이미지를 선택하면, 최신 Commit으로 이미지를 빌드하고 제한된 Docker Sandbox에서 실행한 뒤 **Ansible 점검 → KISA 기준 판정 → Claude 설명 생성 → Dashboard 확인**까지 무개입으로 한 바퀴 도는 파이프라인(AIRPOD)을 만든다.
 
 - 점검 기준을 **KISA 「주요정보통신기반시설」 항목(컨테이너 하드닝 9 + Unix 67 + Web 27 = 103개 카탈로그)**으로 고정한다.
-- **신뢰 경계를 명확히 한다:** 판정은 결정론적 룰(Ansible evidence → KISA judgement)이 하고, Claude는 그 결과를 **사람이 읽을 설명·위험도·조치안으로 번역만** 한다. Claude는 판정을 바꾸지 않는다.
+- **신뢰 경계를 명확히 한다:** Claude가 Ansible evidence와 카탈로그 failCriterion을 근거로 **pass/fail/review 판정과 사람이 읽을 설명·위험도·조치안을 함께** 생성한다. 결정론적 룰은 두 곳에만 쓰인다 — (1) 대상 부재(skip) 판별(보안 판단이 아니라 evidence 존재 여부의 사실), (2) Claude 호출 불가/실패 시의 폴백 판정. Claude는 failCriterion 밖의 새 기준을 만들지 않는다.
 - GitHub/Build 실패에도 **로컬 이미지 fallback**으로 핵심 흐름을 이어가 데모 안정성을 확보한다.
 - 사용자 경험: "Repository 넣고 → 이미지 선택 → 점검 → 읽히는 리포트 확인."
 
@@ -49,7 +49,7 @@
 
 ### Fallback 경로
 14. 보안 담당자로서, GitHub API·clone·Build 실패에도 이미 빌드된 로컬 이미지를 선택해 데모를 이어가고 싶다. 그래야 외부 실패에 발표가 무너지지 않는다.
-15. 보안 담당자로서, fallback 점검도 동일한 Ansible·KISA 판정·Claude·Dashboard 흐름을 쓰기를 원한다. 그래야 결과 품질이 일관된다.
+15. 보안 담당자로서, fallback 점검도 동일한 Ansible·Claude 판정·Dashboard 흐름을 쓰기를 원한다. 그래야 결과 품질이 일관된다.
 
 ### Sandbox 실행
 16. 보안 담당자로서, 선택한 이미지가 제한된 Docker Sandbox에서 실행되기를 원한다. 그래야 점검 대상이 내 환경을 위협하지 않는다.
@@ -64,17 +64,17 @@
 23. 보안 담당자로서, 컨테이너가 웹서버를 포함하면 KISA 웹서비스 점검 항목도 적용되기를 원한다. 그래야 웹 계층도 같은 파이프라인에서 잡는다.
 24. 보안 담당자로서, 대상 컨테이너에 해당 파일·서비스·데몬이 없으면 오류가 아니라 `skip`으로 처리되기를 원한다. 그래야 최소 컨테이너라도 파이프라인이 안 끊긴다.
 25. 보안 담당자로서, 점검 결과가 `{id, category, severity, status, evidence}` 구조로 산출되기를 원한다. 그래야 결과를 기계적으로 다루고 Claude에 넘긴다.
-26. 보안 담당자로서, 명확한 증거가 있으면 `양호`/`취약`으로 판정되고 증거가 부족·환경 의존적일 때만 `검토`가 쓰이기를 원한다. 그래야 판정이 신뢰할 만하다.
+26. 보안 담당자로서, Claude가 명확한 증거가 있으면 `양호`/`취약`으로 판정하고 증거가 부족·환경 의존적일 때만 `검토`로 판정하기를 원한다. 그래야 판정이 신뢰할 만하다.
 27. 보안 담당자로서, 아직 자동화되지 않은 KISA 항목은 카탈로그엔 보이되 자동 판정에서 제외되기를 원한다. 그래야 범위가 투명하다.
 
 ### Claude AI 분석
 28. 보안 담당자로서, Ansible 결과·KISA 판정이 민감정보 제거 후 Claude에 전달되기를 원한다. 그래야 토큰·시크릿이 외부로 나가지 않는다.
-29. 보안 담당자로서, Claude가 보안 기준을 만들거나 판정을 대체하지 않기를 원한다. 그래야 판정의 신뢰 경계가 지켜진다.
+29. 보안 담당자로서, Claude가 evidence·failCriterion 밖의 새 보안 기준을 만들지 않기를 원한다. 그래야 판정이 자의적이지 않고 카탈로그 범위 안에 머문다.
 30. 보안 담당자로서, Claude가 취약점 설명·위험도·판정 근거·원인·조치방안·설정 예시를 생성하기를 원한다. 그래야 raw 로그를 직접 해석하지 않는다.
 31. 보안 담당자로서, Claude 출력이 고정 JSON 스키마로 제공되기를 원한다. 그래야 Dashboard가 안정적으로 파싱한다.
 
 ### Dashboard
-32. 보안 담당자로서, 진행 상태를 `Clone → Build → Sandbox → Ansible → KISA 판정 → Claude → 완료` 단계로 보고 싶다. 그래야 어디까지 됐는지 안다.
+32. 보안 담당자로서, 진행 상태를 `Clone → Build → Sandbox → Ansible → AI 판정·설명 → 완료` 단계로 보고 싶다. 그래야 어디까지 됐는지 안다.
 33. 보안 담당자로서, 이미지 수·Build 상태·점검 상태·취약점 통계 요약 카드를 보고 싶다. 그래야 위험도를 빠르게 가늠한다.
 34. 보안 담당자로서, 이미지별 결과 목록으로 여러 이미지를 비교하고 싶다. 그래야 어느 이미지가 더 위험한지 판단한다.
 35. 보안 담당자로서, 상세 화면에서 개별 KISA 항목·evidence·AI 설명·조치 예시를 보고 싶다. 그래야 개별 취약점을 이해한다.
@@ -89,10 +89,10 @@
   - *GitHub Adapter* — 접근 검증, 파일 트리 조회, clone.
   - *Docker Adapter* — build, run, exec, cleanup, resource limit.
   - *Ansible Adapter* — `ansible-runner` 실행(Docker exec 기반 연결), JSON 수집. 읽기 전용 점검.
-  - *Claude Adapter* — sanitized payload 분석 요청, structured JSON 수신.
+  - *Claude Adapter* — sanitized evidence로 pass/fail/review 판정 요청, structured JSON(판정+설명) 수신.
   - *Catalog Loader* — KISA CSV/JSON 카탈로그 로드(runtime PDF 파싱 안 함).
-  - *Judgement Engine* — evidence 기반 pass/fail/review/skip 판정.
-- **신뢰 경계(핵심 아키텍처 결정):** `Ansible evidence → KISA rule judgement → Claude explanation → Dashboard`. 판정은 결정론적 룰이 소유하고 Claude는 설명만 한다. 룰이 `fail`이면 Claude가 `pass`로 못 바꾸고, `pass`를 근거 없이 취약점으로 못 만든다. evidence가 부족할 때만 `review` 설명을 만든다.
+  - *Judgement Engine* — skip 판별(대상 부재) 및 Claude 호출 불가/실패 시 폴백 pass/fail/review 판정.
+- **신뢰 경계(핵심 아키텍처 결정, 개정):** `Ansible evidence → Claude judgement+explanation → Dashboard`. Claude가 evidence와 카탈로그 failCriterion을 근거로 pass/fail/review를 직접 판정하고 그 설명을 함께 생성한다. failCriterion 밖의 새 기준은 만들 수 없다. 결정론적 Judgement Engine은 (1) 대상 부재(skip) 판별과 (2) Claude 호출 불가/실패 시의 폴백 판정에만 관여한다 — 폴백 경로만 완전한 결정론이 보장되며, 실 Claude 호출 경로는 LLM 특성상 완전한 결정론을 보장하지 않는다.
 - **점검 결과 표준 스키마(계약):** 각 항목을 아래 형태로 정규화한다.
   ```json
   {
@@ -117,8 +117,8 @@
 ## Testing Decisions
 
 - **좋은 테스트의 기준:** 내부 함수 구현이 아니라 **외부로 관찰 가능한 동작**만 검증한다("Repository URL을 넣으면 어떤 결과가 조회되는가").
-- **최고 seam(단일 경계):** **Scan Job Orchestrator API**를 유일한 테스트 경계로 삼는다. `URL 입력 → 이미지 후보 발견 → Build/fallback → Sandbox → Ansible 수집 → KISA 판정 → Claude 분석 → 저장 → Dashboard 조회`를 이 한 지점에서 검증한다. 어댑터는 fake로 대체.
-- **테스트 종류:** Primary E2E(필수 대상 성공 경로), Vulnerable fixture(심어둔 취약 항목이 fail), Safe fixture(대부분 pass/skip), GitHub/Docker/Ansible/Claude fake adapter 계약, KISA catalog 로드(U-01~67·W-01~27 metadata 유지), Judgement(명확 evidence→pass/fail, 불충분→review), **Skip-safe**(NFS·SNMP·IIS 등 미존재→skip), **PAT leakage**(로그·AI payload·DB·Dashboard에 PAT 부재), **Fallback**(실패 후 로컬 이미지로 잔여 흐름 성공), **Re-scan**(재점검 시 이력 무손상).
+- **최고 seam(단일 경계):** **Scan Job Orchestrator API**를 유일한 테스트 경계로 삼는다. `URL 입력 → 이미지 후보 발견 → Build/fallback → Sandbox → Ansible 수집 → Claude 판정·설명 → 저장 → Dashboard 조회`를 이 한 지점에서 검증한다. 어댑터는 fake로 대체.
+- **테스트 종류:** Primary E2E(필수 대상 성공 경로), Vulnerable fixture(심어둔 취약 항목이 fail), Safe fixture(대부분 pass/skip), GitHub/Docker/Ansible/Claude fake adapter 계약, KISA catalog 로드(U-01~67·W-01~27 metadata 유지), **AI 판정**(명확 evidence→pass/fail, 불충분→review; Claude 호출 불가/실패 시에는 결정론적 폴백 판정으로 대체 — 이 폴백 경로만 CI에서 결정론적으로 검증 가능), **Skip-safe**(NFS·SNMP·IIS 등 미존재→skip), **PAT leakage**(로그·AI payload·DB·Dashboard에 PAT 부재), **Fallback**(실패 후 로컬 이미지로 잔여 흐름 성공), **Re-scan**(재점검 시 이력 무손상 — 폴백 경로 기준).
 - **픽스처(=Prior art):** 데모용 "취약 레포 1개 + 안전 레포 1개"를 그대로 테스트 픽스처로 재사용한다.
 - **비결정성 격리:** 실제 GitHub·Docker Build·Claude 호출은 느리고 비결정적이므로 계약 테스트는 fake 어댑터로, 실제 E2E는 가벼운 Repository 1개로만 수행.
 
