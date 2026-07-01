@@ -91,7 +91,8 @@ export class DockerExecutor implements RuntimeExecutor {
   async riskyPackages(handle: RunHandle): Promise<string[] | null> {
     const candidates = ["curl", "wget", "gcc", "cc", "apt", "apt-get", "dpkg", "yum", "apk", "nc", "netcat", "ncat", "make", "perl"];
     try {
-      const script = candidates.map((c) => `command -v ${c} >/dev/null 2>&1 && echo ${c}`).join("; ");
+      // 마지막 후보가 없을 때 sh -c 전체가 non-zero로 끝나 전체 결과가 유실되던 문제 방지: 항상 0으로 종료.
+      const script = candidates.map((c) => `command -v ${c} >/dev/null 2>&1 && echo ${c}`).join("; ") + "; true";
       const out = await docker(["exec", handle.containerId, "sh", "-c", script]);
       return out.split("\n").map((s) => s.trim()).filter(Boolean);
     } catch {
@@ -113,12 +114,20 @@ export class DockerExecutor implements RuntimeExecutor {
   }
 
   async rootFsWritable(handle: RunHandle): Promise<boolean | null> {
+    // 점검용 sandbox는 --read-only로 실행되므로 그 안에서 touch하면 이미지와 무관하게 항상 "읽기전용"으로 보인다.
+    // 이미지 자체의 기본 posture를 알려면 --read-only 없이 별도의 일회용 컨테이너로 관찰한다.
     try {
-      const out = await docker(
-        ["exec", handle.containerId, "sh", "-c",
-          "touch /.airpod_wtest 2>/dev/null && echo yes && rm -f /.airpod_wtest || echo no"],
-      );
-      const v = out.trim();
+      const out = await docker([
+        "run", "--rm",
+        "--network", "none",
+        "--cap-drop", "ALL",
+        "--memory", "256m",
+        "--pids-limit", "128",
+        "--entrypoint", "",
+        handle.imageRef,
+        "sh", "-c", "touch /.airpod_wtest 2>/dev/null && echo yes || echo no",
+      ], 30_000);
+      const v = out.trim().split("\n").pop()?.trim();
       if (v === "yes") return true;
       if (v === "no") return false;
       return null;

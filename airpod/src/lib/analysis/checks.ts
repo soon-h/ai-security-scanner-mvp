@@ -159,7 +159,7 @@ async function evidenceC07(executor: RuntimeExecutor, handle: RunHandle | null):
   return {
     id: "C-07",
     source: executor.source,
-    evidence: writable ? "루트 FS가 쓰기 가능 (--read-only 미적용)" : "루트 FS 읽기 전용 적용됨",
+    evidence: writable ? "이미지 기본 실행 시 루트 FS 쓰기 가능 (--read-only 미강제)" : "루트 FS가 기본 읽기 전용",
     data: { observed: true, writable },
   };
 }
