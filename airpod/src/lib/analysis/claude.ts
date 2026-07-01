@@ -127,6 +127,41 @@ function stubReport(r: CheckResult, safeEvidence: string, note: string): ClaudeR
       remediation: "빌드 시 시크릿을 ENV/ARG로 넣지 말고 런타임 시크릿 주입(예: docker secret, 환경변수 주입)으로 옮긴다.",
       example: "# 잘못된 예: ENV API_KEY=abcd1234\n# 권장: 런타임에 -e API_KEY=... 또는 시크릿 매니저 사용",
     },
+    "C-03": {
+      reason: "SSH·DB 등 관리 포트가 노출되면 공격 표면이 커지고 측면 이동·직접 접근 위험이 있다.",
+      remediation: "불필요한 EXPOSE를 제거하고, 관리·DB 포트는 내부 네트워크로만 접근하도록 제한한다.",
+      example: "# EXPOSE 22 3306  ← 제거\nEXPOSE 8080",
+    },
+    "C-04": {
+      reason: ":latest 또는 태그 미고정은 빌드 재현성을 해치고 예기치 않은 취약 이미지 유입 위험이 있다.",
+      remediation: "명시적 버전 태그 또는 digest(@sha256:...)로 base 이미지를 고정한다.",
+      example: "FROM ubuntu:24.04\n# 또는 FROM ubuntu@sha256:<digest>",
+    },
+    "C-05": {
+      reason: "curl/wget/gcc/apt 등 빌드·네트워크 도구가 상주하면 침해 시 페이로드 다운로드·컴파일에 악용될 수 있다.",
+      remediation: "multi-stage build로 런타임 이미지에서 빌드 도구를 제거하거나 설치 후 정리한다.",
+      example: "RUN apt-get purge -y gcc curl wget && rm -rf /var/lib/apt/lists/*",
+    },
+    "C-06": {
+      reason: "예상 외 setuid/setgid 바이너리는 권한 상승 경로가 될 수 있다.",
+      remediation: "불필요한 setuid/setgid 비트를 제거한다.",
+      example: "chmod u-s /path/to/binary",
+    },
+    "C-07": {
+      reason: "루트 파일시스템이 쓰기 가능하면 침해 시 바이너리·설정 변조가 쉬워진다.",
+      remediation: "컨테이너를 --read-only 로 실행하고 쓰기가 필요한 경로만 tmpfs/volume으로 분리한다.",
+      example: "docker run --read-only --tmpfs /tmp ...",
+    },
+    "C-08": {
+      reason: "HEALTHCHECK가 없으면 컨테이너 이상 상태를 오케스트레이터가 감지하지 못해 장애 대응이 늦어진다.",
+      remediation: "HEALTHCHECK 지시어로 상태 점검 명령을 정의한다.",
+      example: "HEALTHCHECK --interval=30s CMD curl -f http://localhost:8080/health || exit 1",
+    },
+    "C-09": {
+      reason: "원격 URL ADD는 무결성 검증 없이 외부 콘텐츠를 이미지에 포함시켜 공급망 위험을 만든다.",
+      remediation: "로컬 파일은 COPY를 쓰고, 원격 리소스는 검증 가능한 방식으로 별도 단계에서 받는다.",
+      example: "COPY app /app\n# ADD https://... 대신 검증된 다운로드 사용",
+    },
     "U-16": {
       reason: "/etc/passwd 가 과도한 권한이면 계정 정보 변조·권한 상승 위험이 있다.",
       remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",

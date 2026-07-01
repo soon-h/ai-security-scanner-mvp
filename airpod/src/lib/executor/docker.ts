@@ -60,6 +60,73 @@ export class DockerExecutor implements RuntimeExecutor {
     }
   }
 
+  async listeningPorts(handle: RunHandle): Promise<number[] | null> {
+    // /proc/net/tcp(6) 파싱: st==0A(LISTEN)인 local_address의 포트(hex)를 추출.
+    // ss/netstat 부재 환경에서도 동작한다.
+    try {
+      const ports = new Set<number>();
+      for (const f of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+        let out: string;
+        try {
+          out = await docker(["exec", handle.containerId, "cat", f]);
+        } catch {
+          continue;
+        }
+        for (const line of out.split("\n").slice(1)) {
+          const cols = line.trim().split(/\s+/);
+          if (cols.length < 4) continue;
+          const local = cols[1];
+          const state = cols[3];
+          if (state !== "0A") continue; // LISTEN
+          const hexPort = local.split(":")[1];
+          if (hexPort) ports.add(parseInt(hexPort, 16));
+        }
+      }
+      return [...ports].sort((a, b) => a - b);
+    } catch {
+      return null;
+    }
+  }
+
+  async riskyPackages(handle: RunHandle): Promise<string[] | null> {
+    const candidates = ["curl", "wget", "gcc", "cc", "apt", "apt-get", "dpkg", "yum", "apk", "nc", "netcat", "ncat", "make", "perl"];
+    try {
+      const script = candidates.map((c) => `command -v ${c} >/dev/null 2>&1 && echo ${c}`).join("; ");
+      const out = await docker(["exec", handle.containerId, "sh", "-c", script]);
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  async suidSgidBinaries(handle: RunHandle): Promise<string[] | null> {
+    try {
+      const out = await docker(
+        ["exec", handle.containerId, "sh", "-c",
+          "find / -xdev \\( -perm -4000 -o -perm -2000 \\) -type f 2>/dev/null | head -100"],
+        60_000,
+      );
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  async rootFsWritable(handle: RunHandle): Promise<boolean | null> {
+    try {
+      const out = await docker(
+        ["exec", handle.containerId, "sh", "-c",
+          "touch /.airpod_wtest 2>/dev/null && echo yes && rm -f /.airpod_wtest || echo no"],
+      );
+      const v = out.trim();
+      if (v === "yes") return true;
+      if (v === "no") return false;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   async stop(handle: RunHandle): Promise<void> {
     try {
       await docker(["kill", handle.containerId], 30_000);

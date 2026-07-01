@@ -19,6 +19,18 @@ export interface RuntimeExecutor {
   // 컨테이너 내부 파일의 소유자/모드 조회 (U-16 R). 없으면 null → skip.
   statFile(handle: RunHandle, filePath: string): Promise<FileStat | null>;
 
+  // 실행 컨테이너에서 LISTEN 중인 TCP 포트 (C-03 R). null=관찰 불가 → review.
+  listeningPorts(handle: RunHandle): Promise<number[] | null>;
+
+  // 상주하는 위험 패키지/도구 목록 (C-05 R). null=관찰 불가 → review.
+  riskyPackages(handle: RunHandle): Promise<string[] | null>;
+
+  // 예상 외 setuid/setgid 바이너리 목록 (C-06 R). null=관찰 불가 → review.
+  suidSgidBinaries(handle: RunHandle): Promise<string[] | null>;
+
+  // 루트 파일시스템 쓰기 가능 여부 (C-07 R). null=관찰 불가 → review.
+  rootFsWritable(handle: RunHandle): Promise<boolean | null>;
+
   stop(handle: RunHandle): Promise<void>;
 }
 

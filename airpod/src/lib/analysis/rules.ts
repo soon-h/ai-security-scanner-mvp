@@ -42,6 +42,45 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
       const hitCount = (d.hitCount as number) ?? 0;
       return hitCount > 0 ? "fail" : "pass";
     }
+    case "C-03": {
+      if (d.present === false && !d.listeningObserved) return "skip";
+      const exposedSensitive = (d.exposedSensitive as number[]) ?? [];
+      const listeningSensitive = (d.listeningSensitive as number[]) ?? [];
+      // D 또는 R에서 민감 포트가 확인되면 fail
+      if (exposedSensitive.length > 0 || listeningSensitive.length > 0) return "fail";
+      // EXPOSE는 깨끗하지만 런타임 관찰을 못 한 경우에도 D 근거로 pass (명확한 evidence 우선)
+      return "pass";
+    }
+    case "C-04": {
+      if (d.present === false) return "skip";
+      if (d.baseDigestPinned) return "pass";
+      const tag = (d.baseTag as string | null) ?? null;
+      if (tag === null || tag === "latest") return "fail"; // 태그 없음 or :latest
+      return "pass";
+    }
+    case "C-05": {
+      if (d.observed === false) return "review"; // Docker 없이 관찰 불가
+      const packages = (d.packages as string[]) ?? [];
+      return packages.length > 0 ? "fail" : "pass";
+    }
+    case "C-06": {
+      if (d.observed === false) return "review";
+      const unexpected = (d.unexpected as string[]) ?? [];
+      return unexpected.length > 0 ? "fail" : "pass";
+    }
+    case "C-07": {
+      if (d.observed === false) return "review";
+      return d.writable ? "fail" : "pass";
+    }
+    case "C-08": {
+      if (d.present === false) return "skip";
+      return d.hasHealthcheck ? "pass" : "fail";
+    }
+    case "C-09": {
+      if (d.present === false) return "skip";
+      const hitCount = (d.hitCount as number) ?? 0;
+      return hitCount > 0 ? "fail" : "pass";
+    }
     case "U-16": {
       if (d.present === false) return "skip"; // /etc/passwd 없음 또는 미실행
       const owner = (d.owner as string) ?? "";

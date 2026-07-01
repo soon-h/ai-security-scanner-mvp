@@ -34,6 +34,24 @@ export class StubExecutor implements RuntimeExecutor {
     return null;
   }
 
+  // 아래 런타임 관찰은 실제 컨테이너 없이는 정직하게 알 수 없다 → null 반환.
+  // 룰 평가는 이를 review(자동 평가 어려움)로 처리한다. 취약/양호를 지어내지 않는다.
+  async listeningPorts(_handle: RunHandle): Promise<number[] | null> {
+    return null;
+  }
+
+  async riskyPackages(_handle: RunHandle): Promise<string[] | null> {
+    return null;
+  }
+
+  async suidSgidBinaries(_handle: RunHandle): Promise<string[] | null> {
+    return null;
+  }
+
+  async rootFsWritable(_handle: RunHandle): Promise<boolean | null> {
+    return null;
+  }
+
   async stop(_handle: RunHandle): Promise<void> {
     // no-op
   }
