@@ -1,0 +1,23 @@
+{
+  "name": "airpod",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIRPOD — AI 기반 컨테이너 보안 점검 파이프라인 (Slice 1 tracer bullet)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.5.19",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "@types/react": "19.0.7",
+    "@types/react-dom": "19.0.3",
+    "typescript": "5.7.3"
+  }
+}

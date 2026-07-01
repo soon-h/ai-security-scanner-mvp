@@ -1,0 +1,119 @@
+// 점검 결과 상태값 (spec §4). 내부 status와 UI 표시값은 분리한다.
+export type CheckStatus = "pass" | "fail" | "review" | "skip" | "not_automated";
+
+export type Severity = "Critical" | "High" | "Medium" | "Low";
+
+// 점검 방법: D=Dockerfile 정적 분석, R=실행 컨테이너
+export type CheckMethod = "D" | "R" | "D+R";
+
+export type CheckCategory = "container_hardening" | "unix" | "web";
+
+// 정적 카탈로그 항목 정의 (spec §5)
+export interface CatalogItem {
+  id: string; // e.g. "C-01"
+  category: CheckCategory;
+  title: string;
+  severity: Severity;
+  method: CheckMethod;
+  failCriterion: string;
+}
+
+// evidence 출처. stub 여부를 명시해 "실제 런타임 점검"과 "시뮬레이션"을 구분한다.
+export type EvidenceSource = "static" | "docker" | "stub";
+
+// 룰 평가 이전의 원시 점검 산출물 (Ansible evidence에 해당)
+export interface RawCheck {
+  id: string;
+  source: EvidenceSource;
+  evidence: string;
+  // 룰 평가에 쓰이는 구조화 데이터 (예: { runtimeUid: 0 })
+  data?: Record<string, unknown>;
+}
+
+// 가이드 기반 룰 평가 결과 (guide_rule_evaluation)
+export interface CheckResult {
+  id: string;
+  category: CheckCategory;
+  title: string;
+  severity: Severity;
+  method: CheckMethod;
+  status: CheckStatus;
+  source: EvidenceSource;
+  evidence: string;
+  // Claude 설명 (실패/검토 항목에만 채워질 수 있음). AI 실패와 점검 실패는 분리한다.
+  claude?: ClaudeReport | null;
+}
+
+// Claude 출력 스키마 (spec §6)
+export interface ClaudeReport {
+  id: string;
+  status: CheckStatus;
+  severity: Severity;
+  title: string;
+  evidence: string;
+  reason: string;
+  remediation: string;
+  example: string;
+  // 실제 Claude 호출인지, 키 부재/실패로 인한 stub인지 표시
+  generatedBy: "claude" | "stub";
+}
+
+export type StageId =
+  | "clone"
+  | "build"
+  | "sandbox"
+  | "ansible"
+  | "rule_eval"
+  | "claude"
+  | "done";
+
+export type StageStatus = "pending" | "running" | "ok" | "failed" | "skipped";
+
+export interface StageState {
+  id: StageId;
+  label: string;
+  status: StageStatus;
+  detail?: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export type ScanStatus = "running" | "completed" | "failed";
+
+export interface ScanRecord {
+  id: string;
+  repoUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  status: ScanStatus;
+  // executor 및 fallback 상황 표시
+  executor: "docker" | "stub";
+  usedLocalImageFallback: boolean;
+  imageRef?: string;
+  stages: StageState[];
+  results: CheckResult[];
+  error?: string;
+}
+
+export interface ScanSummary {
+  fail: number;
+  pass: number;
+  review: number;
+  skip: number;
+  not_automated: number;
+}
+
+export function summarize(results: CheckResult[]): ScanSummary {
+  const s: ScanSummary = { fail: 0, pass: 0, review: 0, skip: 0, not_automated: 0 };
+  for (const r of results) s[r.status] += 1;
+  return s;
+}
+
+// 내부 status → UI 표시값 (spec §4). "KISA 판정" 표현은 쓰지 않는다.
+export const STATUS_LABEL_KO: Record<CheckStatus, string> = {
+  pass: "양호",
+  fail: "취약",
+  review: "검토",
+  skip: "제외/해당 없음",
+  not_automated: "자동화 전",
+};
