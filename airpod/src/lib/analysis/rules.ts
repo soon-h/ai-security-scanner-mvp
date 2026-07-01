@@ -31,11 +31,11 @@ function evaluateStatus(raw: RawCheck): CheckStatus {
     case "C-01": {
       const userDirective = (d.userDirective as string | null) ?? null;
       const runtimeUid = (d.runtimeUid as number | null) ?? null;
+      // 런타임 UID를 관찰했으면 그것이 ground truth (USER 지시어보다 우선).
+      if (runtimeUid !== null) return runtimeUid === 0 ? "fail" : "pass";
+      // 런타임 미관찰 → 정적 USER 지시어로 판정 (미지정/root → fail)
       const userIsRoot = userDirective === null || userDirective === "root" || userDirective === "0";
-      if (runtimeUid === 0) return "fail"; // 실행 UID=0
-      if (userIsRoot) return "fail"; // USER 미지정 or root
-      // USER가 non-root이고 실행 UID도 0이 아니거나 확인 불가 → 양호
-      return "pass";
+      return userIsRoot ? "fail" : "pass";
     }
     case "C-02": {
       if (d.present === false) return "skip"; // Dockerfile 없음

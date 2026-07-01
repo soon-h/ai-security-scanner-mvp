@@ -42,6 +42,15 @@ test("no runtime observation: unobservable → review/skip, never a fabricated f
   assert.equal(m.get("C-08"), "pass");
 });
 
+test("C-01: observed runtime UID overrides the static USER directive", async () => {
+  // Dockerfile 없음(지시어 null)이지만 런타임 uid=1000 관찰 → 양호 (fallback 이미지 사례)
+  const nonRoot = await statusMap(null, new FakeExecutor({ runtimeUid: 1000 }), HANDLE);
+  assert.equal(nonRoot.get("C-01"), "pass");
+  // USER app 지시어가 있어도 런타임 uid=0이면 취약 (런타임이 ground truth)
+  const rootAtRuntime = await statusMap("FROM x\nUSER app", new FakeExecutor({ runtimeUid: 0 }), HANDLE);
+  assert.equal(rootAtRuntime.get("C-01"), "fail");
+});
+
 test("source is propagated from the executor into results", async () => {
   const raws = await collectEvidence(SAFE_DOCKERFILE, new FakeExecutor(safeOptions()), HANDLE);
   const c05 = raws.find((r) => r.id === "C-05");
