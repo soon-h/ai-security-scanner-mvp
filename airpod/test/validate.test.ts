@@ -12,6 +12,13 @@ test("validateRepoUrl: accepts https/http/git@, rejects empty/whitespace/other s
   assert.ok(validateRepoUrl("ftp://github.com/owner/repo"));
 });
 
+test("validateRepoUrl: also accepts local filesystem paths (offline/fixture scans)", () => {
+  assert.equal(validateRepoUrl("C:/Users/dev/repo-fixture"), null);
+  assert.equal(validateRepoUrl("C:\\Users\\dev\\repo-fixture"), null);
+  assert.equal(validateRepoUrl("/home/dev/repo-fixture"), null);
+  assert.equal(validateRepoUrl("./repo-fixture"), null);
+});
+
 test("validateBranch: empty is valid (defaults later), rejects whitespace/.. /bad chars", () => {
   assert.equal(validateBranch(""), null);
   assert.equal(validateBranch("main"), null);

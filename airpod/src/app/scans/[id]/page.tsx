@@ -9,6 +9,8 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanError, setRescanError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/scans/${id}`);
@@ -35,6 +37,28 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
     }
   }, [scan]);
 
+  async function rescan() {
+    if (!scan) return;
+    setRescanning(true);
+    setRescanError(null);
+    try {
+      // PAT는 저장하지 않으므로 재점검은 PAT 없이 진행된다 — private repo면 홈에서 PAT를 다시 입력해야 한다.
+      const res = await fetch("/api/scans", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repoUrl: scan.repoUrl, branch: scan.branch, candidatePath: scan.candidatePath }),
+      });
+      const data = await res.json();
+      if (res.ok && data.id) {
+        window.location.href = `/scans/${data.id}`;
+        return;
+      }
+      setRescanError(data.error ?? "재점검을 시작할 수 없습니다.");
+    } finally {
+      setRescanning(false);
+    }
+  }
+
   if (notFound) return <div className="panel">스캔을 찾을 수 없습니다. <Link href="/">← 홈</Link></div>;
   if (!scan) return <div className="panel muted">불러오는 중…</div>;
 
@@ -54,8 +78,15 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
               {scan.candidatePath ? ` · ${scan.candidatePath}` : ""}
             </div>
           </div>
+          <button onClick={rescan} disabled={rescanning}>
+            {rescanning ? "재점검 시작 중…" : "재점검"}
+          </button>
           <Link href="/">← 홈</Link>
         </div>
+
+        {rescanError && (
+          <div className="notice warn" style={{ marginTop: 12 }}>{rescanError}</div>
+        )}
 
         {scan.executor === "stub" && (
           <div className="notice warn" style={{ marginTop: 12 }}>

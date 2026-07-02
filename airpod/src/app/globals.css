@@ -127,3 +127,8 @@ pre {
 }
 .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; margin: 6px 0; }
 .kv .k { color: var(--muted); }
+
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.summary-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.summary-card .num { font-size: 22px; font-weight: 800; }
+.summary-card .label { color: var(--muted); font-size: 12px; margin-top: 2px; }

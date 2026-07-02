@@ -5,12 +5,19 @@
 export const DEFAULT_BRANCH = "main";
 const MAX_PAT_LENGTH = 255;
 
+// 원격 URL(https/http/git@) 외에 로컬 파일 경로도 허용한다 — cloneRepo가 결국 `git clone <target>`을
+// 그대로 실행하고 git은 로컬 경로도 clone 대상으로 받아들이며, 실제로 로컬 fixture repo를 이 필드에
+// 넣어 점검하는 흐름이 이미 쓰이고 있다(오프라인 데모/수동 검증). 여기서 거르는 건 완전히 빈 값이나
+// 공백처럼 "명백히 잘못된" 입력뿐이다.
+const REMOTE_URL_RE = /^(https?:\/\/|git@)\S+$/;
+const LOCAL_PATH_RE = /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])\S*$/;
+
 export function validateRepoUrl(url: string): string | null {
   const trimmed = url.trim();
   if (!trimmed) return "Repository URL을 입력하세요.";
   if (/\s/.test(trimmed)) return "Repository URL에 공백을 포함할 수 없습니다.";
-  if (!/^(https?:\/\/|git@)\S+$/.test(trimmed)) {
-    return "Repository URL은 https://, http:// 또는 git@ 형식이어야 합니다.";
+  if (!REMOTE_URL_RE.test(trimmed) && !LOCAL_PATH_RE.test(trimmed)) {
+    return "Repository URL은 https://, http://, git@ 또는 로컬 경로 형식이어야 합니다.";
   }
   return null;
 }

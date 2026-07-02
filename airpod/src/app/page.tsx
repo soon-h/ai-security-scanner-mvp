@@ -175,6 +175,13 @@ export default function Home() {
         )}
       </div>
 
+      {scans.length > 0 && (
+        <div className="panel">
+          <h2>요약</h2>
+          <SummaryCards scans={scans} />
+        </div>
+      )}
+
       <div className="panel">
         <h2>점검 이력</h2>
         {scans.length === 0 ? (
@@ -238,6 +245,37 @@ export default function Home() {
 
 function shortRepo(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\.git$/, "");
+}
+
+// 이미지 수·Build 상태·점검 상태·취약점 통계 요약 카드 (spec story 33).
+function SummaryCards({ scans }: { scans: ScanRecord[] }) {
+  const totalImages = scans.length;
+  const fallbackBuilds = scans.filter((s) => s.usedLocalImageFallback).length;
+  const running = scans.filter((s) => s.status === "running").length;
+  const completed = scans.filter((s) => s.status === "completed").length;
+  const failedScans = scans.filter((s) => s.status === "failed").length;
+  const totalFailChecks = scans.reduce((sum, s) => sum + s.results.filter((r) => r.status === "fail").length, 0);
+
+  return (
+    <div className="summary">
+      <div className="summary-card">
+        <div className="num">{totalImages}</div>
+        <div className="label">점검한 이미지</div>
+      </div>
+      <div className="summary-card">
+        <div className="num">{totalImages - fallbackBuilds} / {fallbackBuilds}</div>
+        <div className="label">정상 빌드 / fallback</div>
+      </div>
+      <div className="summary-card">
+        <div className="num">{completed} · {running} · {failedScans}</div>
+        <div className="label">완료 · 진행중 · 실패</div>
+      </div>
+      <div className="summary-card">
+        <div className="num" style={{ color: "var(--fail)" }}>{totalFailChecks}</div>
+        <div className="label">전체 취약 항목 수</div>
+      </div>
+    </div>
+  );
 }
 
 function StatusChip({ status }: { status: ScanRecord["status"] }) {
