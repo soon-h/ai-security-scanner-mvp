@@ -7,7 +7,10 @@ import { STATUS_LABEL_KO } from "@/lib/types";
 
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState("https://github.com/vulnerables/web-dvwa");
+  const [branch, setBranch] = useState("");
+  const [pat, setPat] = useState("");
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
 
   const load = useCallback(async () => {
@@ -25,14 +28,19 @@ export default function Home() {
   async function start() {
     if (!repoUrl.trim()) return;
     setStarting(true);
+    setError(null);
     try {
       const res = await fetch("/api/scans", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repoUrl }),
+        body: JSON.stringify({ repoUrl, branch, pat: pat || undefined }),
       });
       const data = await res.json();
-      if (data.id) window.location.href = `/scans/${data.id}`;
+      if (res.ok && data.id) {
+        window.location.href = `/scans/${data.id}`;
+        return;
+      }
+      setError(data.error ?? "점검을 시작할 수 없습니다.");
     } finally {
       setStarting(false);
     }
@@ -59,6 +67,30 @@ export default function Home() {
             {starting ? "시작 중…" : "점검 시작"}
           </button>
         </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <input
+            type="text"
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            placeholder="branch (기본: main)"
+            style={{ maxWidth: 200 }}
+          />
+          <input
+            type="password"
+            value={pat}
+            onChange={(e) => setPat(e.target.value)}
+            placeholder="GitHub PAT (private repo만 필요)"
+            className="grow"
+          />
+        </div>
+        <p className="muted small" style={{ marginTop: 6 }}>
+          PAT는 이 점검의 clone에만 임시로 사용되고 저장·기록되지 않습니다.
+        </p>
+        {error && (
+          <div className="notice warn" style={{ marginTop: 10 }}>
+            {error}
+          </div>
+        )}
       </div>
 
       <div className="panel">

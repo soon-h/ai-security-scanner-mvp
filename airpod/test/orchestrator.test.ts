@@ -107,6 +107,28 @@ test("PAT never leaks into the persisted scan record", async () => {
   assert.ok(!serialized.includes(VULN_TOKEN), "raw token must not appear anywhere in the record");
 });
 
+test("PAT never leaks even when the clone error message embeds a credentialed URL", async () => {
+  const store = memStore();
+  const scan = makeScan("pat2", "https://example.com/repo.git");
+  const FAKE_PAT = "ghp_leaktest0123456789abcdefghijklmnop";
+  await runPipeline(
+    scan,
+    {
+      ...deps(new FakeExecutor(safeOptions()), SAFE_DOCKERFILE, store, { cloneFails: false }),
+      // execFile 실패 시 Node가 실제로 명령/인자(인증 URL 포함)를 에러 메시지에 담는 것을 시뮬레이션한다.
+      cloneRepo: async () => {
+        throw new Error(`Command failed: git clone --depth 1 https://x-access-token:${FAKE_PAT}@example.com/repo.git /tmp/x`);
+      },
+    },
+    FAKE_PAT,
+  );
+
+  const final = store.get("pat2")!;
+  const serialized = JSON.stringify(final);
+  assert.ok(!serialized.includes(FAKE_PAT), "PAT must not survive into the persisted scan record via error messages");
+  assert.equal(final.status, "completed"); // clone 실패는 fallback으로 흡수되어 스캔 자체는 계속된다
+});
+
 test("clone failure ensures the fallback image, runs it, and completes", async () => {
   const store = memStore();
   const scan = makeScan("fb1");

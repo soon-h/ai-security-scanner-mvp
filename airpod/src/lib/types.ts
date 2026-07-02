@@ -83,6 +83,8 @@ export type ScanStatus = "running" | "completed" | "failed";
 export interface ScanRecord {
   id: string;
   repoUrl: string;
+  // PAT는 여기 포함되지 않는다 — clone 1회 호출에만 쓰이고 저장되지 않는다 (spec story 3/4).
+  branch: string;
   createdAt: string;
   updatedAt: string;
   status: ScanStatus;

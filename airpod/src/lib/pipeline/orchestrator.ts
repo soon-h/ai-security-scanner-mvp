@@ -6,6 +6,7 @@ import type { RuntimeExecutor, RunHandle } from "../executor/types";
 import { cloneRepo as defaultCloneRepo, cleanupWorkdir as defaultCleanupWorkdir, type CloneResult } from "./repo";
 import { collectEvidence } from "../analysis/checks";
 import { judgeAll as defaultJudgeResults } from "../analysis/claude";
+import { sanitize } from "../analysis/sanitize";
 
 const FALLBACK_IMAGE = "airpod/fallback:local";
 // fallback 이미지 빌드 컨텍스트. 앱 루트(process.cwd())의 fallback/ 디렉터리에 Dockerfile이 있다.
@@ -14,7 +15,7 @@ const FALLBACK_CONTEXT = path.join(process.cwd(), "fallback");
 // 파이프라인이 의존하는 외부 어댑터. 기본값은 실제 구현이며, 테스트는 fake로 교체한다 (spec: 단일 seam).
 export interface PipelineDeps {
   pickExecutor: () => Promise<RuntimeExecutor>;
-  cloneRepo: (repoUrl: string) => Promise<CloneResult>;
+  cloneRepo: (repoUrl: string, branch: string, pat?: string) => Promise<CloneResult>;
   cleanupWorkdir: (workdir: string) => Promise<void>;
   judgeResults: (raws: RawCheck[]) => Promise<CheckResult[]>;
   saveScan: (scan: ScanRecord) => Promise<void>;
@@ -46,10 +47,18 @@ function stage(scan: ScanRecord, id: StageId): StageState {
   return s;
 }
 
+// 실행 실패 메시지를 영속화하기 전에 sanitize한다. clone에 PAT 인증 URL을 썼다면
+// execFile 실패 메시지에 그 URL이 그대로 담길 수 있어(Node가 명령/인자를 에러에 포함시킴),
+// 이 경로가 사실상 유일한 PAT 유출 지점이다 — sanitize.ts의 url_creds 패턴으로 걸러낸다.
+function safeMsg(err: unknown): string {
+  return sanitize((err as Error).message).text;
+}
+
 // 파이프라인 본체. scan 레코드를 단계별로 갱신하며 저장한다.
 // clone/build 실패 시 local image fallback으로 핵심 점검 흐름을 계속한다 (spec §8-A-4).
 // overrides로 어댑터(executor/clone/analyze/store)를 주입할 수 있어 seam 단위 테스트가 가능하다.
-export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineDeps> = {}): Promise<void> {
+// pat은 scan/deps 어디에도 저장하지 않고 clone 1회 호출에만 전달한다(spec story 3: 장기 평문 저장 금지).
+export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineDeps> = {}, pat?: string): Promise<void> {
   const deps = { ...defaultDeps, ...overrides };
   const save = deps.saveScan;
 
@@ -79,7 +88,7 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     // 1. Clone
     await begin("clone", `executor=${executor.kind}`);
     try {
-      clone = await deps.cloneRepo(scan.repoUrl);
+      clone = await deps.cloneRepo(scan.repoUrl, scan.branch, pat);
       await finish(
         "clone",
         "ok",
@@ -87,7 +96,7 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
       );
     } catch (err) {
       scan.usedLocalImageFallback = true;
-      await finish("clone", "failed", `clone 실패 → local image fallback: ${(err as Error).message}`);
+      await finish("clone", "failed", `clone 실패 → local image fallback: ${safeMsg(err)}`);
     }
 
     // 2. Build
@@ -101,7 +110,7 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
       } catch (err) {
         scan.usedLocalImageFallback = true;
         imageRef = FALLBACK_IMAGE;
-        await finish("build", "failed", `build 실패 → local image fallback: ${(err as Error).message}`);
+        await finish("build", "failed", `build 실패 → local image fallback: ${safeMsg(err)}`);
       }
     } else {
       scan.usedLocalImageFallback = true;
@@ -121,7 +130,7 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
       await finish("sandbox", "ok", `container=${handle.containerId.slice(0, 12)} (network none, read-only, cap-drop ALL)`);
     } catch (err) {
       handle = null;
-      await finish("sandbox", "failed", `sandbox 실행 실패 — 런타임 항목은 skip/review 처리: ${(err as Error).message}`);
+      await finish("sandbox", "failed", `sandbox 실행 실패 — 런타임 항목은 skip/review 처리: ${safeMsg(err)}`);
     }
 
     // 4. Ansible 점검 (evidence 수집)
@@ -144,7 +153,7 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     await save(scan);
   } catch (err) {
     scan.status = "failed";
-    scan.error = (err as Error).message;
+    scan.error = safeMsg(err);
     await save(scan);
   } finally {
     if (handle) await executor.stop(handle);

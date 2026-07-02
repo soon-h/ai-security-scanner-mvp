@@ -91,11 +91,12 @@ export const SAFE_TOMCAT = [
   "</web-app>",
 ].join("\n");
 
-export function makeScan(id: string, repoUrl = "https://example.com/repo.git"): ScanRecord {
+export function makeScan(id: string, repoUrl = "https://example.com/repo.git", branch = "main"): ScanRecord {
   const now = new Date().toISOString();
   return {
     id,
     repoUrl,
+    branch,
     createdAt: now,
     updatedAt: now,
     status: "running",

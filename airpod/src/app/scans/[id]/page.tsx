@@ -46,7 +46,7 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
       <div className="panel">
         <div className="row">
           <div className="grow">
-            <h1>{shortRepo(scan.repoUrl)}</h1>
+            <h1>{shortRepo(scan.repoUrl)}@{scan.branch}</h1>
             <div className="muted small">
               scan {scan.id} · {scan.executor === "docker" ? "Docker" : "Stub(시뮬레이션)"} executor
               {scan.usedLocalImageFallback ? " · local image fallback 사용" : ""}
