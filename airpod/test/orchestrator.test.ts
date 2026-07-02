@@ -12,6 +12,8 @@ import { FakeExecutor, vulnerableOptions, safeOptions } from "./helpers/fakes";
 import { makeScan, memStore, VULN_DOCKERFILE, SAFE_DOCKERFILE } from "./helpers/fixtures";
 import { VULN_TOKEN } from "./helpers/fixtures";
 
+const FAKE_COMMIT_SHA = "deadbeef00112233445566778899aabbccddeef";
+
 function deps(
   executor: RuntimeExecutor,
   dockerfileContent: string | null,
@@ -20,9 +22,14 @@ function deps(
 ): Partial<PipelineDeps> {
   return {
     pickExecutor: async () => executor,
-    cloneRepo: async () => {
+    cloneRepo: async (_repoUrl, _branch, _pat, candidatePath) => {
       if (opts.cloneFails) throw new Error("clone boom");
-      return { workdir: "/fake/wd", dockerfilePath: "/fake/wd/Dockerfile", dockerfileContent };
+      return {
+        workdir: "/fake/wd",
+        dockerfilePath: candidatePath ? `/fake/wd/${candidatePath}` : "/fake/wd/Dockerfile",
+        dockerfileContent,
+        commitSha: FAKE_COMMIT_SHA,
+      };
     },
     cleanupWorkdir: async () => {},
     saveScan: store.saveScan,
@@ -46,6 +53,8 @@ test("happy path: safe repo completes with all stages ok and zero fails", async 
   assert.equal(failIds(final).length, 0);
   for (const st of final.stages) assert.equal(st.status, "ok", `stage ${st.id}`);
   assert.match(final.imageRef!, /airpod\/scan-safe1/);
+  assert.equal(final.commitSha, FAKE_COMMIT_SHA, "commit SHA from a successful clone must be recorded");
+  assert.match(final.imageRef!, new RegExp(FAKE_COMMIT_SHA.slice(0, 12)), "image tag must embed the short commit SHA");
   assert.equal(exec.stopped, true, "sandbox container must be stopped");
 });
 
@@ -145,8 +154,20 @@ test("clone failure ensures the fallback image, runs it, and completes", async (
   assert.equal(st.get("build"), "skipped");
   assert.equal(st.get("sandbox"), "ok"); // fallback 이미지로 sandbox가 실행됨
   assert.equal(st.get("done"), "ok");
+  assert.equal(final.commitSha, undefined, "no successful clone → no commit SHA to report");
   // 정적 근거(Dockerfile)는 없지만 런타임 항목은 fallback 이미지에서 관찰된다
   assert.equal(final.results.find((r) => r.id === "C-05")!.status, "pass");
+});
+
+test("candidatePath is forwarded to cloneRepo and recorded on the scan", async () => {
+  const store = memStore();
+  const scan = makeScan("cand1");
+  const exec = new FakeExecutor(safeOptions());
+  await runPipeline(scan, deps(exec, SAFE_DOCKERFILE, store), undefined, "nginx/Dockerfile");
+
+  const final = store.get("cand1")!;
+  assert.equal(final.candidatePath, "nginx/Dockerfile");
+  assert.equal(final.status, "completed");
 });
 
 test("ensureImage is not called on the normal (built-image) path", async () => {

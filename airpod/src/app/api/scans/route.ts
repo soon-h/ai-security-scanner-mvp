@@ -17,7 +17,7 @@ export async function GET() {
 
 // 새 스캔 시작 → 파이프라인을 백그라운드로 실행하고 즉시 id 반환
 export async function POST(req: Request) {
-  let body: { repoUrl?: string; branch?: string; pat?: string };
+  let body: { repoUrl?: string; branch?: string; pat?: string; candidatePath?: string };
   try {
     body = await req.json();
   } catch {
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: validated.error }, { status: 400 });
   }
   // pat은 이 함수 스코프 지역 변수로만 존재한다 — scan 레코드/로그에는 절대 넣지 않는다.
-  const { repoUrl, branch, pat } = validated;
+  const { repoUrl, branch, pat, candidatePath } = validated;
 
   const now = new Date().toISOString();
   const scan: ScanRecord = {
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
   await saveScan(scan);
 
   // fire-and-forget: 응답을 막지 않고 파이프라인을 진행한다. UI는 폴링으로 상태를 읽는다.
-  void runPipeline(scan, {}, pat).catch(async (err) => {
+  void runPipeline(scan, {}, pat, candidatePath).catch(async (err) => {
     scan.status = "failed";
     scan.error = sanitize((err as Error).message).text;
     await saveScan(scan);

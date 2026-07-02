@@ -5,10 +5,18 @@ import Link from "next/link";
 import type { ScanRecord } from "@/lib/types";
 import { STATUS_LABEL_KO } from "@/lib/types";
 
+interface Candidate {
+  path: string;
+  baseImageGuess: string | null;
+}
+
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState("https://github.com/vulnerables/web-dvwa");
   const [branch, setBranch] = useState("");
   const [pat, setPat] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
@@ -25,15 +33,45 @@ export default function Home() {
     return () => clearInterval(t);
   }, [load]);
 
-  async function start() {
+  // repo/branch/pat이 바뀌면 이전 후보 목록은 stale하므로 초기화한다.
+  function resetDiscovery() {
+    setCandidates(null);
+    setSelectedPath(undefined);
+    setError(null);
+  }
+
+  async function discover() {
     if (!repoUrl.trim()) return;
+    setDiscovering(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/scans/discover", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repoUrl, branch, pat: pat || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "레포를 분석할 수 없습니다.");
+        setCandidates(null);
+        return;
+      }
+      const found: Candidate[] = data.candidates ?? [];
+      setCandidates(found);
+      setSelectedPath(found[0]?.path);
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  async function start() {
     setStarting(true);
     setError(null);
     try {
       const res = await fetch("/api/scans", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repoUrl, branch, pat: pat || undefined }),
+        body: JSON.stringify({ repoUrl, branch, pat: pat || undefined, candidatePath: selectedPath }),
       });
       const data = await res.json();
       if (res.ok && data.id) {
@@ -51,34 +89,44 @@ export default function Home() {
       <div className="panel">
         <h1>컨테이너 보안 점검 시작</h1>
         <p className="muted small">
-          GitHub 레포 URL을 넣으면 Clone → Build → Sandbox → Ansible 점검 → AI 판정·설명까지 자동으로 한 바퀴 돕니다.
+          GitHub 레포 URL을 넣고 레포를 분석하면 이미지 후보를 찾아줍니다. 후보를 고르면 Clone →
+          Build → Sandbox → Ansible 점검 → AI 판정·설명까지 자동으로 한 바퀴 돕니다.
         </p>
         <div className="row" style={{ marginTop: 12 }}>
           <div className="grow">
             <input
               type="text"
               value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
+              onChange={(e) => {
+                setRepoUrl(e.target.value);
+                resetDiscovery();
+              }}
               placeholder="https://github.com/owner/repo"
-              onKeyDown={(e) => e.key === "Enter" && start()}
+              onKeyDown={(e) => e.key === "Enter" && discover()}
             />
           </div>
-          <button onClick={start} disabled={starting}>
-            {starting ? "시작 중…" : "점검 시작"}
+          <button onClick={discover} disabled={discovering}>
+            {discovering ? "분석 중…" : "레포 분석"}
           </button>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <input
             type="text"
             value={branch}
-            onChange={(e) => setBranch(e.target.value)}
+            onChange={(e) => {
+              setBranch(e.target.value);
+              resetDiscovery();
+            }}
             placeholder="branch (기본: main)"
             style={{ maxWidth: 200 }}
           />
           <input
             type="password"
             value={pat}
-            onChange={(e) => setPat(e.target.value)}
+            onChange={(e) => {
+              setPat(e.target.value);
+              resetDiscovery();
+            }}
             placeholder="GitHub PAT (private repo만 필요)"
             className="grow"
           />
@@ -89,6 +137,40 @@ export default function Home() {
         {error && (
           <div className="notice warn" style={{ marginTop: 10 }}>
             {error}
+          </div>
+        )}
+
+        {candidates !== null && (
+          <div style={{ marginTop: 14 }}>
+            {candidates.length === 0 ? (
+              <>
+                <div className="notice warn">Dockerfile을 찾지 못했습니다 — fallback 이미지로 점검을 진행합니다.</div>
+                <button style={{ marginTop: 8 }} onClick={start} disabled={starting}>
+                  {starting ? "시작 중…" : "점검 시작 (fallback)"}
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="small muted" style={{ margin: "8px 0" }}>이미지 후보</h3>
+                {candidates.map((c) => (
+                  <label key={c.path} className="row" style={{ marginTop: 4, cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="candidate"
+                      checked={selectedPath === c.path}
+                      onChange={() => setSelectedPath(c.path)}
+                    />
+                    <span className="small">
+                      <code>{c.path}</code>
+                      {c.baseImageGuess && <span className="muted"> — base: {c.baseImageGuess}</span>}
+                    </span>
+                  </label>
+                ))}
+                <button style={{ marginTop: 10 }} onClick={start} disabled={starting || !selectedPath}>
+                  {starting ? "시작 중…" : "점검 시작"}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

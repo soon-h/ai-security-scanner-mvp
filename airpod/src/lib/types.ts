@@ -92,6 +92,8 @@ export interface ScanRecord {
   executor: "docker" | "stub";
   usedLocalImageFallback: boolean;
   imageRef?: string;
+  commitSha?: string; // 빌드에 쓰인 실제 커밋 (clone 성공 시에만 채워짐)
+  candidatePath?: string; // 사용자가 후보 목록에서 고른 Dockerfile 경로 (미선택/자동감지 시 없음)
   stages: StageState[];
   results: CheckResult[];
   error?: string;

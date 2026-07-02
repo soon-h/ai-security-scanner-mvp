@@ -15,7 +15,7 @@ const FALLBACK_CONTEXT = path.join(process.cwd(), "fallback");
 // 파이프라인이 의존하는 외부 어댑터. 기본값은 실제 구현이며, 테스트는 fake로 교체한다 (spec: 단일 seam).
 export interface PipelineDeps {
   pickExecutor: () => Promise<RuntimeExecutor>;
-  cloneRepo: (repoUrl: string, branch: string, pat?: string) => Promise<CloneResult>;
+  cloneRepo: (repoUrl: string, branch: string, pat?: string, candidatePath?: string) => Promise<CloneResult>;
   cleanupWorkdir: (workdir: string) => Promise<void>;
   judgeResults: (raws: RawCheck[]) => Promise<CheckResult[]>;
   saveScan: (scan: ScanRecord) => Promise<void>;
@@ -58,7 +58,13 @@ function safeMsg(err: unknown): string {
 // clone/build 실패 시 local image fallback으로 핵심 점검 흐름을 계속한다 (spec §8-A-4).
 // overrides로 어댑터(executor/clone/analyze/store)를 주입할 수 있어 seam 단위 테스트가 가능하다.
 // pat은 scan/deps 어디에도 저장하지 않고 clone 1회 호출에만 전달한다(spec story 3: 장기 평문 저장 금지).
-export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineDeps> = {}, pat?: string): Promise<void> {
+// candidatePath는 discover에서 사용자가 고른 Dockerfile(있으면) — 민감정보가 아니라 scan에 기록된다.
+export async function runPipeline(
+  scan: ScanRecord,
+  overrides: Partial<PipelineDeps> = {},
+  pat?: string,
+  candidatePath?: string,
+): Promise<void> {
   const deps = { ...defaultDeps, ...overrides };
   const save = deps.saveScan;
 
@@ -88,7 +94,9 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     // 1. Clone
     await begin("clone", `executor=${executor.kind}`);
     try {
-      clone = await deps.cloneRepo(scan.repoUrl, scan.branch, pat);
+      clone = await deps.cloneRepo(scan.repoUrl, scan.branch, pat, candidatePath);
+      scan.commitSha = clone.commitSha;
+      scan.candidatePath = candidatePath;
       await finish(
         "clone",
         "ok",
@@ -104,7 +112,9 @@ export async function runPipeline(scan: ScanRecord, overrides: Partial<PipelineD
     let imageRef = FALLBACK_IMAGE;
     if (clone?.workdir) {
       try {
-        const built = await executor.build(clone.workdir, `airpod/scan-${scan.id}:latest`);
+        // commit SHA 기반 태그 (spec story 12) — 소스 상태를 이미지에 연결한다.
+        const tag = `airpod/scan-${scan.id}:${clone.commitSha.slice(0, 12)}`;
+        const built = await executor.build(clone.workdir, tag, clone.dockerfilePath ?? undefined);
         imageRef = built.imageRef;
         await finish("build", "ok", built.logTail.split("\n").slice(-1)[0] || "build ok");
       } catch (err) {

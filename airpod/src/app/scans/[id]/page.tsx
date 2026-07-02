@@ -50,6 +50,8 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
             <div className="muted small">
               scan {scan.id} · {scan.executor === "docker" ? "Docker" : "Stub(시뮬레이션)"} executor
               {scan.usedLocalImageFallback ? " · local image fallback 사용" : ""}
+              {scan.commitSha ? ` · commit ${scan.commitSha.slice(0, 7)}` : ""}
+              {scan.candidatePath ? ` · ${scan.candidatePath}` : ""}
             </div>
           </div>
           <Link href="/">← 홈</Link>

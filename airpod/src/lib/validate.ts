@@ -2,7 +2,7 @@
 // 여기서 걸러내는 건 "명백히 잘못된 입력"이다 — git 자체의 존재/권한 검증(레포 실존 여부 등)은
 // clone 단계에서 실패하고 fallback으로 이어진다(spec §8-A-4).
 
-const DEFAULT_BRANCH = "main";
+export const DEFAULT_BRANCH = "main";
 const MAX_PAT_LENGTH = 255;
 
 export function validateRepoUrl(url: string): string | null {
@@ -37,13 +37,30 @@ export function validatePat(pat: string | undefined, repoUrl: string): string | 
   return null;
 }
 
+// candidatePath는 discover가 돌려준 후보 중 하나를 그대로 되돌려받는 정상 흐름이라 화이트리스트
+// 검증까지는 하지 않는다 — 다만 경로 탈출(.., 절대경로, 역슬래시)만 형태로 거른다.
+export function validateCandidatePath(candidatePath: string | undefined): string | null {
+  if (!candidatePath) return null;
+  if (candidatePath.includes("\\")) return "candidatePath에 역슬래시를 포함할 수 없습니다.";
+  if (candidatePath.startsWith("/") || /^[A-Za-z]:/.test(candidatePath)) {
+    return "candidatePath는 상대경로여야 합니다.";
+  }
+  if (candidatePath.split("/").includes("..")) {
+    return "candidatePath에 '..' 를 포함할 수 없습니다.";
+  }
+  return null;
+}
+
 export interface ScanInput {
   repoUrl?: string;
   branch?: string;
   pat?: string;
+  candidatePath?: string;
 }
 
-export type ScanInputResult = { ok: true; repoUrl: string; branch: string; pat?: string } | { ok: false; error: string };
+export type ScanInputResult =
+  | { ok: true; repoUrl: string; branch: string; pat?: string; candidatePath?: string }
+  | { ok: false; error: string };
 
 export function validateScanInput(input: ScanInput): ScanInputResult {
   const repoUrl = (input.repoUrl || "").trim();
@@ -58,5 +75,8 @@ export function validateScanInput(input: ScanInput): ScanInputResult {
   const patError = validatePat(input.pat, repoUrl);
   if (patError) return { ok: false, error: patError };
 
-  return { ok: true, repoUrl, branch, pat: input.pat || undefined };
+  const candidatePathError = validateCandidatePath(input.candidatePath);
+  if (candidatePathError) return { ok: false, error: candidatePathError };
+
+  return { ok: true, repoUrl, branch, pat: input.pat || undefined, candidatePath: input.candidatePath || undefined };
 }

@@ -7,8 +7,9 @@ export interface RuntimeExecutor {
   readonly kind: "docker" | "stub";
   readonly source: EvidenceSource; // 이 executor가 만든 evidence의 출처 표기
 
-  // 이미지 빌드. 실패 시 예외를 던진다(오케스트레이터가 local fallback 처리).
-  build(workdir: string, tag: string): Promise<BuildResult>;
+  // 이미지 빌드. dockerfilePath가 있으면 그 파일을 빌드 대상으로 쓴다(후보 선택, spec story 7-8).
+  // 없으면 workdir 루트의 기본 Dockerfile을 쓴다. 실패 시 예외를 던진다(오케스트레이터가 local fallback 처리).
+  build(workdir: string, tag: string, dockerfilePath?: string): Promise<BuildResult>;
 
   // 지정 이미지가 로컬에 없으면 buildContextDir에서 빌드한다 (fallback 이미지 보장).
   // 실패 시 예외를 던진다(sandbox 실행이 실패하며 런타임 항목은 degrade).

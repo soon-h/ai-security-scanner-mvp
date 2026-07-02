@@ -15,8 +15,11 @@ export class DockerExecutor implements RuntimeExecutor {
   readonly kind = "docker" as const;
   readonly source = "docker" as const;
 
-  async build(workdir: string, tag: string): Promise<BuildResult> {
-    const out = await docker(["build", "-t", tag, workdir], 300_000);
+  async build(workdir: string, tag: string, dockerfilePath?: string): Promise<BuildResult> {
+    const args = dockerfilePath
+      ? ["build", "-t", tag, "-f", dockerfilePath, workdir]
+      : ["build", "-t", tag, workdir];
+    const out = await docker(args, 300_000);
     return { imageRef: tag, logTail: out.split("\n").slice(-20).join("\n") };
   }
 
