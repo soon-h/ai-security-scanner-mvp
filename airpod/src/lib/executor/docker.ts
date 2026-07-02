@@ -1,0 +1,279 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import type { RuntimeExecutor, BuildResult, RunHandle, FileStat, WebServerInfo } from "./types";
+
+const pexec = promisify(execFile);
+
+async function docker(args: string[], timeoutMs = 120_000): Promise<string> {
+  const { stdout } = await pexec("docker", args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
+  return stdout;
+}
+
+// 실제 Docker CLI 기반 executor. host docker socket을 사용하는 로컬 데몬에 build/run 한다 (spec §12).
+// Sandbox 격리 옵션(spec §9)을 run 시 적용한다.
+export class DockerExecutor implements RuntimeExecutor {
+  readonly kind = "docker" as const;
+  readonly source = "docker" as const;
+
+  async build(workdir: string, tag: string, dockerfilePath?: string): Promise<BuildResult> {
+    const args = dockerfilePath
+      ? ["build", "-t", tag, "-f", dockerfilePath, workdir]
+      : ["build", "-t", tag, workdir];
+    const out = await docker(args, 300_000);
+    return { imageRef: tag, logTail: out.split("\n").slice(-20).join("\n") };
+  }
+
+  async ensureImage(ref: string, buildContextDir: string): Promise<void> {
+    try {
+      await docker(["image", "inspect", ref], 10_000);
+      return; // 이미 존재
+    } catch {
+      // 없으면 빌드
+    }
+    await docker(["build", "-t", ref, buildContextDir], 300_000);
+  }
+
+  async run(imageRef: string): Promise<RunHandle> {
+    // 격리 실행: 네트워크 차단, 읽기전용 FS, 모든 capability 제거, 메모리/PID 제한.
+    // 점검을 위해 컨테이너를 유지해야 하므로 sleep 엔트리포인트로 띄운다.
+    const out = await docker([
+      "run", "-d", "--rm",
+      "--network", "none",
+      "--read-only",
+      "--cap-drop", "ALL",
+      "--memory", "512m",
+      "--pids-limit", "256",
+      "--entrypoint", "",
+      imageRef,
+      "sleep", "120",
+    ]);
+    const containerId = out.trim();
+    return { containerId, imageRef };
+  }
+
+  async inspectRuntimeUid(handle: RunHandle): Promise<number | null> {
+    try {
+      const out = await docker(["exec", handle.containerId, "id", "-u"]);
+      const uid = parseInt(out.trim(), 10);
+      return Number.isNaN(uid) ? null : uid;
+    } catch {
+      return null;
+    }
+  }
+
+  async statFile(handle: RunHandle, filePath: string): Promise<FileStat | null> {
+    try {
+      // stat 포맷: 8진수 모드 소유자 그룹
+      const out = await docker(["exec", handle.containerId, "stat", "-c", "%a %U %G", filePath]);
+      const [mode, owner, group] = out.trim().split(/\s+/);
+      return { path: filePath, owner, group, mode };
+    } catch {
+      // 파일이 없으면 stat 실패 → skip 대상
+      return null;
+    }
+  }
+
+  async readTextFile(handle: RunHandle, filePath: string): Promise<string | null> {
+    try {
+      return await docker(["exec", handle.containerId, "cat", filePath]);
+    } catch {
+      return null;
+    }
+  }
+
+  async worldWritableFiles(handle: RunHandle): Promise<string[] | null> {
+    try {
+      const out = await docker(
+        ["exec", handle.containerId, "sh", "-c",
+          "find / -xdev -type f -perm -0002 2>/dev/null | head -100; true"],
+        60_000,
+      );
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  async detectWebServer(handle: RunHandle): Promise<WebServerInfo | null> {
+    const id = handle.containerId;
+
+    // nginx 우선 탐지
+    let hasNginx = false;
+    try {
+      const which = await docker(["exec", id, "sh", "-c", "command -v nginx || true"]);
+      hasNginx = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (hasNginx) {
+      const configPath = "/etc/nginx/nginx.conf";
+      let configText = "";
+      try {
+        // nginx -T: include까지 병합된 전체 설정을 덤프한다.
+        configText = await docker(["exec", id, "nginx", "-T"], 20_000);
+      } catch {
+        try {
+          configText = await docker(["exec", id, "cat", configPath]);
+        } catch {
+          configText = "";
+        }
+      }
+      return { kind: "nginx", configText, configPath };
+    }
+
+    // apache httpd 탐지 (httpd / apache2)
+    let hasApache = false;
+    try {
+      const which = await docker(["exec", id, "sh", "-c", "command -v httpd || command -v apache2 || true"]);
+      hasApache = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (hasApache) {
+      // apache는 nginx -T 같은 병합 덤프가 없어 주 설정 파일을 읽는다 (배포판별 경로 후보).
+      const candidates = [
+        "/usr/local/apache2/conf/httpd.conf",
+        "/etc/apache2/apache2.conf",
+        "/etc/httpd/conf/httpd.conf",
+      ];
+      for (const p of candidates) {
+        try {
+          const text = await docker(["exec", id, "cat", p]);
+          if (text.trim().length > 0) return { kind: "apache", configText: text, configPath: p };
+        } catch {
+          // 다음 후보
+        }
+      }
+      return { kind: "apache", configText: "", configPath: candidates[0] };
+    }
+
+    // tomcat 탐지: 공식 이미지는 CATALINA_HOME/bin이 PATH에 있어 catalina.sh를 찾을 수 있다.
+    let hasTomcat = false;
+    try {
+      const which = await docker(["exec", id, "sh", "-c", "command -v catalina.sh || true"]);
+      hasTomcat = which.trim().length > 0;
+    } catch {
+      return null;
+    }
+    if (hasTomcat) {
+      // server.xml(실행 설정) + web.xml(디폴트 서블릿/에러페이지)을 이어붙여 하나의 텍스트로 다룬다.
+      const candidates = [
+        { server: "/usr/local/tomcat/conf/server.xml", web: "/usr/local/tomcat/conf/web.xml" },
+        { server: "/etc/tomcat9/server.xml", web: "/etc/tomcat9/web.xml" },
+        { server: "/etc/tomcat/server.xml", web: "/etc/tomcat/web.xml" },
+      ];
+      for (const p of candidates) {
+        try {
+          const serverXml = await docker(["exec", id, "cat", p.server]);
+          let webXml = "";
+          try {
+            webXml = await docker(["exec", id, "cat", p.web]);
+          } catch {
+            // web.xml 없어도 server.xml만으로 진행
+          }
+          if (serverXml.trim().length > 0) {
+            return { kind: "tomcat", configText: `${serverXml}\n${webXml}`, configPath: p.server };
+          }
+        } catch {
+          // 다음 후보
+        }
+      }
+      return { kind: "tomcat", configText: "", configPath: candidates[0].server };
+    }
+
+    return null;
+  }
+
+  async listeningPorts(handle: RunHandle): Promise<number[] | null> {
+    // /proc/net/tcp(6) 파싱: st==0A(LISTEN)인 local_address의 포트(hex)를 추출.
+    // ss/netstat 부재 환경에서도 동작한다.
+    try {
+      const ports = new Set<number>();
+      for (const f of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+        let out: string;
+        try {
+          out = await docker(["exec", handle.containerId, "cat", f]);
+        } catch {
+          continue;
+        }
+        for (const line of out.split("\n").slice(1)) {
+          const cols = line.trim().split(/\s+/);
+          if (cols.length < 4) continue;
+          const local = cols[1];
+          const state = cols[3];
+          if (state !== "0A") continue; // LISTEN
+          const hexPort = local.split(":")[1];
+          if (hexPort) ports.add(parseInt(hexPort, 16));
+        }
+      }
+      return [...ports].sort((a, b) => a - b);
+    } catch {
+      return null;
+    }
+  }
+
+  async riskyPackages(handle: RunHandle): Promise<string[] | null> {
+    const candidates = ["curl", "wget", "gcc", "cc", "apt", "apt-get", "dpkg", "yum", "apk", "nc", "netcat", "ncat", "make", "perl"];
+    try {
+      // 마지막 후보가 없을 때 sh -c 전체가 non-zero로 끝나 전체 결과가 유실되던 문제 방지: 항상 0으로 종료.
+      const script = candidates.map((c) => `command -v ${c} >/dev/null 2>&1 && echo ${c}`).join("; ") + "; true";
+      const out = await docker(["exec", handle.containerId, "sh", "-c", script]);
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  async suidSgidBinaries(handle: RunHandle): Promise<string[] | null> {
+    try {
+      const out = await docker(
+        ["exec", handle.containerId, "sh", "-c",
+          "find / -xdev \\( -perm -4000 -o -perm -2000 \\) -type f 2>/dev/null | head -100"],
+        60_000,
+      );
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  async rootFsWritable(handle: RunHandle): Promise<boolean | null> {
+    // 점검용 sandbox는 --read-only로 실행되므로 그 안에서 touch하면 이미지와 무관하게 항상 "읽기전용"으로 보인다.
+    // 이미지 자체의 기본 posture를 알려면 --read-only 없이 별도의 일회용 컨테이너로 관찰한다.
+    try {
+      const out = await docker([
+        "run", "--rm",
+        "--network", "none",
+        "--cap-drop", "ALL",
+        "--memory", "256m",
+        "--pids-limit", "128",
+        "--entrypoint", "",
+        handle.imageRef,
+        "sh", "-c", "touch /.airpod_wtest 2>/dev/null && echo yes || echo no",
+      ], 30_000);
+      const v = out.trim().split("\n").pop()?.trim();
+      if (v === "yes") return true;
+      if (v === "no") return false;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async stop(handle: RunHandle): Promise<void> {
+    try {
+      await docker(["kill", handle.containerId], 30_000);
+    } catch {
+      // 이미 종료된 경우 무시
+    }
+  }
+}
+
+export async function isDockerAvailable(): Promise<boolean> {
+  try {
+    await docker(["version", "--format", "{{.Server.Version}}"], 8_000);
+    return true;
+  } catch {
+    return false;
+  }
+}

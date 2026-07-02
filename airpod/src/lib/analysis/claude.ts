@@ -1,0 +1,289 @@
+import type { RawCheck, CheckResult, ClaudeReport, CatalogItem, CheckStatus } from "../types";
+import { getCatalogItem } from "../catalog";
+import { evaluate } from "./rules";
+import { sanitize } from "./sanitize";
+
+// Claude 판정 + 설명 (신뢰 경계 개정).
+// Claude가 evidence와 카탈로그 failCriterion을 근거로 pass/fail/review를 직접 판정하고,
+// 그 근거·조치방안·설정 예시를 함께 생성한다. failCriterion 밖의 새 기준은 만들지 않는다.
+// skip(대상 부재)만은 여전히 결정론적으로 처리한다 — 보안 판단이 아니라 evidence 존재
+// 여부의 사실이기 때문이다 (rules.ts).
+// API 키 부재/호출 실패 시에는 rules.ts의 결정론적 판정으로 폴백한다 (AI 실패와 점검 실패 분리).
+
+const API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+const DEFAULT_MODEL = "claude-sonnet-5";
+
+// 구조화 출력 강제: tool_use로 스키마를 고정한다. status는 Claude가 스스로 판정한 값.
+const REPORT_TOOL = {
+  name: "emit_report",
+  description: "evidence를 근거로 점검 항목의 판정(status)과 사람이 읽기 좋은 보안 리포트를 반환한다.",
+  input_schema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["pass", "fail", "review"],
+        description:
+          "evidence와 failCriterion만 근거로 스스로 판정한 결과. 명확한 근거가 있으면 review보다 pass/fail을 우선하고, 근거가 불충분·환경 의존적일 때만 review.",
+      },
+      situation: { type: "string", description: "evidence로 확인된 현재 상황을 사람이 읽기 쉬운 문장으로 서술 (기술적 evidence를 그대로 반복하지 말고 무슨 상태인지 설명)" },
+      reason: { type: "string", description: "그 situation이 왜 이 status(판정)로 이어지는지의 판단 근거 — failCriterion과 evidence를 어떻게 연결해 이 판정을 내렸는지 설명" },
+      remediation: { type: "string", description: "구체적 조치 방안. status가 pass(양호)이면 고칠 게 없으므로 빈 문자열로 남긴다." },
+      example: { type: "string", description: "설정/코드 예시. status가 pass면 빈 문자열이어도 된다." },
+    },
+    required: ["status", "situation", "reason", "remediation", "example"],
+  },
+} as const;
+
+export async function judgeAll(raws: RawCheck[]): Promise<CheckResult[]> {
+  const out: CheckResult[] = [];
+  for (const raw of raws) {
+    out.push(await judgeRaw(raw));
+  }
+  return out;
+}
+
+async function judgeRaw(raw: RawCheck): Promise<CheckResult> {
+  const item = getCatalogItem(raw.id);
+  const ruleResult = evaluate(raw);
+  // skip은 AI 판정 대상이 아니다 — 대상 부재는 evidence 존재 여부의 사실.
+  if (ruleResult.status === "skip") return ruleResult;
+
+  const claude = await judgeOne(raw, item, ruleResult.status);
+  return {
+    id: item.id,
+    category: item.category,
+    title: item.title,
+    severity: item.severity,
+    method: item.method,
+    status: claude.status,
+    source: raw.source,
+    evidence: raw.evidence,
+    claude,
+  };
+}
+
+async function judgeOne(raw: RawCheck, item: CatalogItem, fallbackStatus: CheckStatus): Promise<ClaudeReport> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+
+  // Claude 입력은 반드시 sanitize한다.
+  const safeEvidence = sanitize(raw.evidence).text;
+
+  if (!apiKey) {
+    return stubReport(item, fallbackStatus, safeEvidence, "ANTHROPIC_API_KEY 미설정 — 결정론적 판정으로 대체");
+  }
+
+  const system =
+    "너는 컨테이너 보안 점검 결과를 판정하는 보안 담당자다. " +
+    "주어진 evidence와 failCriterion만 근거로 이 항목이 pass(양호)/fail(취약)/review(검토) 중 무엇인지 스스로 판정하라. " +
+    "명확한 evidence가 있으면 review보다 pass/fail을 우선하고, evidence가 불충분하거나 환경 의존적일 때만 review로 판정하라. " +
+    "failCriterion 밖의 새로운 보안 기준을 만들지 마라. " +
+    "리포트는 situation(현재 상황을 사람이 읽기 쉽게 서술) · reason(그 상황이 왜 이 판정으로 이어지는지 분석) · " +
+    "remediation(구체적 조치 방안, status가 pass면 빈 문자열) · example(설정/코드 예시) 네 부분으로 나눠 작성하라. " +
+    "반드시 emit_report 도구로만 답하라.";
+
+  const userPayload = sanitize(
+    JSON.stringify({
+      id: item.id,
+      title: item.title,
+      severity: item.severity,
+      failCriterion: item.failCriterion,
+      evidence: safeEvidence,
+    }),
+  ).text;
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1024,
+        system,
+        tools: [REPORT_TOOL],
+        tool_choice: { type: "tool", name: "emit_report" },
+        messages: [{ role: "user", content: `다음 점검 항목을 evidence만 근거로 판정하라:\n${userPayload}` }],
+      }),
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      return stubReport(item, fallbackStatus, safeEvidence, `Claude API 오류 ${resp.status}: ${body.slice(0, 200)}`);
+    }
+
+    const json = (await resp.json()) as {
+      content: { type: string; name?: string; input?: Record<string, string> }[];
+    };
+    const toolUse = json.content.find((c) => c.type === "tool_use" && c.name === "emit_report");
+    const input = toolUse?.input;
+    if (!input?.situation || !input?.reason || !input?.status) {
+      return stubReport(item, fallbackStatus, safeEvidence, "Claude 응답에 유효한 판정 없음");
+    }
+    if (input.status !== "pass" && input.status !== "fail" && input.status !== "review") {
+      return stubReport(item, fallbackStatus, safeEvidence, `Claude가 알 수 없는 status 반환: ${input.status}`);
+    }
+
+    return {
+      id: item.id,
+      status: input.status,
+      severity: item.severity,
+      title: item.title,
+      evidence: safeEvidence,
+      situation: input.situation,
+      reason: input.reason,
+      // pass(양호)에는 조치할 게 없다 — Claude가 뭘 반환했든 여기서 확정한다(trust boundary: 모델의
+      // 응답을 곧이곧대로 믿지 않고 이 규칙만은 코드가 강제).
+      remediation: input.status === "pass" ? "" : input.remediation ?? "",
+      example: input.example ?? "",
+      generatedBy: "claude",
+    };
+  } catch (err) {
+    return stubReport(item, fallbackStatus, safeEvidence, `Claude 호출 실패: ${(err as Error).message}`);
+  }
+}
+
+// 키 부재/실패 시 사용하는 결정적 stub 리포트. status는 rules.ts의 폴백 판정을 그대로 쓴다.
+function stubReport(item: CatalogItem, status: CheckStatus, safeEvidence: string, note: string): ClaudeReport {
+  const canned: Record<string, { reason: string; remediation: string; example: string }> = {
+    "C-01": {
+      reason: "root 권한으로 실행되는 컨테이너는 침해 시 호스트 자원 접근 위험을 키운다.",
+      remediation: "Dockerfile에 non-root 사용자를 생성하고 USER 지시어로 전환한다.",
+      example: "RUN useradd -r appuser\nUSER appuser",
+    },
+    "C-02": {
+      reason: "이미지 레이어에 하드코딩된 시크릿은 이미지를 가진 누구나 추출할 수 있다.",
+      remediation: "빌드 시 시크릿을 ENV/ARG로 넣지 말고 런타임 시크릿 주입(예: docker secret, 환경변수 주입)으로 옮긴다.",
+      example: "# 잘못된 예: ENV API_KEY=abcd1234\n# 권장: 런타임에 -e API_KEY=... 또는 시크릿 매니저 사용",
+    },
+    "C-03": {
+      reason: "SSH·DB 등 관리 포트가 노출되면 공격 표면이 커지고 측면 이동·직접 접근 위험이 있다.",
+      remediation: "불필요한 EXPOSE를 제거하고, 관리·DB 포트는 내부 네트워크로만 접근하도록 제한한다.",
+      example: "# EXPOSE 22 3306  ← 제거\nEXPOSE 8080",
+    },
+    "C-04": {
+      reason: ":latest 또는 태그 미고정은 빌드 재현성을 해치고 예기치 않은 취약 이미지 유입 위험이 있다.",
+      remediation: "명시적 버전 태그 또는 digest(@sha256:...)로 base 이미지를 고정한다.",
+      example: "FROM ubuntu:24.04\n# 또는 FROM ubuntu@sha256:<digest>",
+    },
+    "C-05": {
+      reason: "curl/wget/gcc/apt 등 빌드·네트워크 도구가 상주하면 침해 시 페이로드 다운로드·컴파일에 악용될 수 있다.",
+      remediation: "multi-stage build로 런타임 이미지에서 빌드 도구를 제거하거나 설치 후 정리한다.",
+      example: "RUN apt-get purge -y gcc curl wget && rm -rf /var/lib/apt/lists/*",
+    },
+    "C-06": {
+      reason: "예상 외 setuid/setgid 바이너리는 권한 상승 경로가 될 수 있다.",
+      remediation: "불필요한 setuid/setgid 비트를 제거한다.",
+      example: "chmod u-s /path/to/binary",
+    },
+    "C-07": {
+      reason: "루트 파일시스템이 쓰기 가능하면 침해 시 바이너리·설정 변조가 쉬워진다.",
+      remediation: "컨테이너를 --read-only 로 실행하고 쓰기가 필요한 경로만 tmpfs/volume으로 분리한다.",
+      example: "docker run --read-only --tmpfs /tmp ...",
+    },
+    "C-08": {
+      reason: "HEALTHCHECK가 없으면 컨테이너 이상 상태를 오케스트레이터가 감지하지 못해 장애 대응이 늦어진다.",
+      remediation: "HEALTHCHECK 지시어로 상태 점검 명령을 정의한다.",
+      example: "HEALTHCHECK --interval=30s CMD curl -f http://localhost:8080/health || exit 1",
+    },
+    "C-09": {
+      reason: "원격 URL ADD는 무결성 검증 없이 외부 콘텐츠를 이미지에 포함시켜 공급망 위험을 만든다.",
+      remediation: "로컬 파일은 COPY를 쓰고, 원격 리소스는 검증 가능한 방식으로 별도 단계에서 받는다.",
+      example: "COPY app /app\n# ADD https://... 대신 검증된 다운로드 사용",
+    },
+    "U-04": {
+      reason: "암호 해시가 /etc/passwd 에 직접 있으면 누구나 읽어 오프라인 크래킹 대상이 된다.",
+      remediation: "shadow 패스워드를 사용해 해시를 /etc/shadow(제한 권한)로 분리한다.",
+      example: "pwconv   # /etc/passwd 의 해시를 /etc/shadow 로 이관",
+    },
+    "U-05": {
+      reason: "root 외 계정에 UID 0이 있으면 해당 계정이 root와 동일한 전권을 가져 계정 통제가 무너진다.",
+      remediation: "UID 0은 root 계정에만 부여하고, 나머지 계정은 고유한 비-0 UID로 재설정한다.",
+      example: "usermod -u 1001 <account>   # UID 0 중복 계정 교정",
+    },
+    "U-16": {
+      reason: "/etc/passwd 가 과도한 권한이면 계정 정보 변조·권한 상승 위험이 있다.",
+      remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
+      example: "chown root:root /etc/passwd\nchmod 644 /etc/passwd",
+    },
+    "U-18": {
+      reason: "/etc/shadow 가 노출되면 암호 해시가 유출돼 크래킹·권한 상승으로 이어진다.",
+      remediation: "소유자를 root 로, 권한을 640 이하(others 권한 제거)로 설정한다.",
+      example: "chown root:shadow /etc/shadow\nchmod 640 /etc/shadow",
+    },
+    "U-19": {
+      reason: "/etc/hosts 를 임의 수정할 수 있으면 이름 해석을 조작해 트래픽을 가로챌 수 있다.",
+      remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
+      example: "chown root:root /etc/hosts\nchmod 644 /etc/hosts",
+    },
+    "U-22": {
+      reason: "/etc/services 를 변조할 수 있으면 포트-서비스 매핑이 왜곡돼 오탐·우회에 악용될 수 있다.",
+      remediation: "소유자를 root:root 로, 권한을 644 이하로 설정한다.",
+      example: "chown root:root /etc/services\nchmod 644 /etc/services",
+    },
+    "U-25": {
+      reason: "world-writable 파일은 임의 사용자가 내용을 바꿀 수 있어 변조·권한 상승 경로가 된다.",
+      remediation: "불필요한 others 쓰기 권한을 제거하고, 공유가 필요하면 그룹 권한과 sticky bit로 통제한다.",
+      example: "chmod o-w <file>   # 필요한 경우 find / -xdev -type f -perm -0002 로 점검",
+    },
+    "W-01": {
+      reason: "디렉토리 리스팅이 켜지면 의도치 않은 파일·경로가 노출돼 정보 수집에 악용된다.",
+      remediation: "autoindex를 off로 두고 필요한 경우에만 제한적으로 사용한다.",
+      example: "location / {\n    autoindex off;\n}",
+    },
+    "W-08": {
+      reason: "접근 로그가 없으면 침해 발생 시 추적·대응이 불가능하다.",
+      remediation: "access_log를 활성화하고 로그를 안전한 위치에 보관한다.",
+      example: "access_log /var/log/nginx/access.log;",
+    },
+    "W-09": {
+      reason: "기본 에러 페이지는 서버 종류·버전 등 내부 정보를 노출할 수 있다.",
+      remediation: "error_page로 사용자 정의 오류 페이지를 지정한다.",
+      example: "error_page 404 /404.html;\nerror_page 500 502 503 504 /50x.html;",
+    },
+    "W-21": {
+      reason: "웹서버 워커가 root로 실행되면 취약점 악용 시 피해 범위가 커진다.",
+      remediation: "user 지시어로 비-root 계정(nginx/www-data)으로 실행한다.",
+      example: "user nginx;",
+    },
+    "W-22": {
+      reason: "설정 파일이 과도한 권한이면 공격자가 설정을 변조해 서버를 장악할 수 있다.",
+      remediation: "소유자를 root로, 그룹/기타 쓰기 권한을 제거한다.",
+      example: "chown root:root /etc/nginx/nginx.conf\nchmod 644 /etc/nginx/nginx.conf",
+    },
+    "W-25": {
+      reason: "PUT/DELETE 등 불필요한 HTTP Method 허용은 파일 변조·삭제 공격 표면을 만든다.",
+      remediation: "필요한 메서드만 허용하고 나머지는 차단한다.",
+      example: "location / {\n    limit_except GET POST { deny all; }\n}",
+    },
+    "W-26": {
+      reason: "Server 헤더의 버전 노출은 알려진 취약점 표적화를 쉽게 만든다.",
+      remediation: "server_tokens를 off로 설정해 버전 정보를 숨긴다.",
+      example: "http {\n    server_tokens off;\n}",
+    },
+  };
+  const base = canned[item.id] ?? {
+    reason: "evidence 기반으로 추가 검토가 필요하다.",
+    remediation: "가이드 기준에 맞게 설정을 조정한다.",
+    example: "",
+  };
+  return {
+    id: item.id,
+    status,
+    severity: item.severity,
+    title: item.title,
+    evidence: safeEvidence,
+    // 폴백은 실제 evidence 텍스트를 그대로 "현재상황"으로 쓴다 — AI 호출 없이 생성하는 것이라
+    // 항목별로 자연어 상황 설명을 따로 캔에 담아두지 않는다.
+    situation: safeEvidence,
+    reason: `${base.reason}\n\n(참고: ${note})`,
+    remediation: status === "pass" ? "" : base.remediation,
+    example: status === "pass" ? "" : base.example,
+    generatedBy: "stub",
+  };
+}

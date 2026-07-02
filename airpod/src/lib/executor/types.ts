@@ -1,0 +1,72 @@
+import type { EvidenceSource } from "../types";
+
+// 런타임 점검을 위한 컨테이너 실행 추상화.
+// 실제 구현(DockerExecutor)과 시뮬레이션(StubExecutor)이 동일 인터페이스를 만족한다.
+// Docker 설치 후에도 오케스트레이터/점검 로직을 바꾸지 않고 executor만 교체할 수 있다.
+export interface RuntimeExecutor {
+  readonly kind: "docker" | "stub";
+  readonly source: EvidenceSource; // 이 executor가 만든 evidence의 출처 표기
+
+  // 이미지 빌드. dockerfilePath가 있으면 그 파일을 빌드 대상으로 쓴다(후보 선택, spec story 7-8).
+  // 없으면 workdir 루트의 기본 Dockerfile을 쓴다. 실패 시 예외를 던진다(오케스트레이터가 local fallback 처리).
+  build(workdir: string, tag: string, dockerfilePath?: string): Promise<BuildResult>;
+
+  // 지정 이미지가 로컬에 없으면 buildContextDir에서 빌드한다 (fallback 이미지 보장).
+  // 실패 시 예외를 던진다(sandbox 실행이 실패하며 런타임 항목은 degrade).
+  ensureImage(ref: string, buildContextDir: string): Promise<void>;
+
+  // 격리 옵션 하에 컨테이너 실행. 점검이 끝나면 stop()으로 정리한다.
+  run(imageRef: string): Promise<RunHandle>;
+
+  // 실행 중 컨테이너의 프로세스 UID (C-01 R). null이면 확인 불가 → review.
+  inspectRuntimeUid(handle: RunHandle): Promise<number | null>;
+
+  // 컨테이너 내부 파일의 소유자/모드 조회 (U-16/18/19/22 R). 없으면 null → skip.
+  statFile(handle: RunHandle, filePath: string): Promise<FileStat | null>;
+
+  // 컨테이너 내부 텍스트 파일 내용 조회 (U-04/U-05: /etc/passwd 파싱). null=읽기 불가 → review.
+  readTextFile(handle: RunHandle, filePath: string): Promise<string | null>;
+
+  // others 쓰기 권한이 있는 파일 목록 (U-25 R). null=관찰 불가 → review.
+  worldWritableFiles(handle: RunHandle): Promise<string[] | null>;
+
+  // 컨테이너 내 웹서버 탐지 및 병합 설정 조회 (W 항목). null=웹서버 없음 → 웹 항목 skip.
+  detectWebServer(handle: RunHandle): Promise<WebServerInfo | null>;
+
+  // 실행 컨테이너에서 LISTEN 중인 TCP 포트 (C-03 R). null=관찰 불가 → review.
+  listeningPorts(handle: RunHandle): Promise<number[] | null>;
+
+  // 상주하는 위험 패키지/도구 목록 (C-05 R). null=관찰 불가 → review.
+  riskyPackages(handle: RunHandle): Promise<string[] | null>;
+
+  // 예상 외 setuid/setgid 바이너리 목록 (C-06 R). null=관찰 불가 → review.
+  suidSgidBinaries(handle: RunHandle): Promise<string[] | null>;
+
+  // 루트 파일시스템 쓰기 가능 여부 (C-07 R). null=관찰 불가 → review.
+  rootFsWritable(handle: RunHandle): Promise<boolean | null>;
+
+  stop(handle: RunHandle): Promise<void>;
+}
+
+export interface BuildResult {
+  imageRef: string;
+  logTail: string;
+}
+
+export interface RunHandle {
+  containerId: string;
+  imageRef: string;
+}
+
+export interface FileStat {
+  path: string;
+  owner: string; // e.g. "root"
+  group: string;
+  mode: string; // octal string e.g. "644"
+}
+
+export interface WebServerInfo {
+  kind: "nginx" | "apache" | "tomcat";
+  configText: string; // nginx: `nginx -T` 병합 설정 / apache: 주 설정 파일 / tomcat: server.xml+web.xml 이어붙임
+  configPath: string; // 주 설정 파일 경로 (권한 점검용)
+}
