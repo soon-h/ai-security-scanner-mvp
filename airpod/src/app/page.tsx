@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import type { ScanRecord } from "@/lib/types";
-import { STATUS_LABEL_KO } from "@/lib/types";
+import { STATUS_LABEL_KO, effectiveStatus } from "@/lib/types";
 
 interface Candidate {
   path: string;
@@ -199,9 +199,9 @@ export default function Home() {
             </thead>
             <tbody>
               {scans.map((s) => {
-                const fail = s.results.filter((r) => r.status === "fail").length;
-                const pass = s.results.filter((r) => r.status === "pass").length;
-                const skip = s.results.filter((r) => r.status === "skip").length;
+                const fail = s.results.filter((r) => effectiveStatus(r) === "fail").length;
+                const pass = s.results.filter((r) => effectiveStatus(r) === "pass").length;
+                const skip = s.results.filter((r) => effectiveStatus(r) === "skip").length;
                 return (
                   <tr key={s.id}>
                     <td>
@@ -254,7 +254,7 @@ function SummaryCards({ scans }: { scans: ScanRecord[] }) {
   const running = scans.filter((s) => s.status === "running").length;
   const completed = scans.filter((s) => s.status === "completed").length;
   const failedScans = scans.filter((s) => s.status === "failed").length;
-  const totalFailChecks = scans.reduce((sum, s) => sum + s.results.filter((r) => r.status === "fail").length, 0);
+  const totalFailChecks = scans.reduce((sum, s) => sum + s.results.filter((r) => effectiveStatus(r) === "fail").length, 0);
 
   return (
     <div className="summary">
