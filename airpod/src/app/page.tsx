@@ -20,6 +20,7 @@ export default function Home() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const res = await fetch("/api/scans");
@@ -62,6 +63,20 @@ export default function Home() {
     } finally {
       setDiscovering(false);
     }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function exportSelected() {
+    if (selectedIds.size === 0) return;
+    window.location.href = `/api/export?ids=${[...selectedIds].join(",")}`;
   }
 
   async function start() {
@@ -183,13 +198,21 @@ export default function Home() {
       )}
 
       <div className="panel">
-        <h2>점검 이력</h2>
+        <div className="row">
+          <h2 className="grow">점검 이력</h2>
+          {scans.length > 0 && (
+            <button onClick={exportSelected} disabled={selectedIds.size === 0}>
+              선택 항목 리포트로 내보내기 ({selectedIds.size})
+            </button>
+          )}
+        </div>
         {scans.length === 0 ? (
           <p className="muted small">아직 실행한 점검이 없습니다.</p>
         ) : (
           <table>
             <thead>
               <tr>
+                <th></th>
                 <th>레포</th>
                 <th>상태</th>
                 <th>결과 요약</th>
@@ -204,6 +227,13 @@ export default function Home() {
                 const skip = s.results.filter((r) => effectiveStatus(r) === "skip").length;
                 return (
                   <tr key={s.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(s.id)}
+                        onChange={() => toggleSelected(s.id)}
+                      />
+                    </td>
                     <td>
                       <Link href={`/scans/${s.id}`}>{shortRepo(s.repoUrl)}</Link>
                       <div className="muted small">{s.id}</div>

@@ -73,6 +73,9 @@ export default function ScanDetail({ params }: { params: Promise<{ id: string }>
               {scan.candidatePath ? ` · ${scan.candidatePath}` : ""}
             </div>
           </div>
+          {scan.status === "completed" && (
+            <a className="btn-link" href={`/api/export?ids=${scan.id}`}>리포트 내보내기</a>
+          )}
           <button onClick={rescan} disabled={rescanning}>
             {rescanning ? "재점검 시작 중…" : "재점검"}
           </button>
