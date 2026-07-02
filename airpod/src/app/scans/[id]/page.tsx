@@ -223,8 +223,13 @@ function ResultRow({
                 <>
                   <h4>Claude 분석 {r.claude.generatedBy === "stub" ? "(stub)" : ""}</h4>
                   <div className="kv">
-                    <span className="k">원인</span><span>{r.claude.reason}</span>
-                    <span className="k">조치방안</span><span>{r.claude.remediation}</span>
+                    <span className="k">현재상황</span><span>{r.claude.situation}</span>
+                    <span className="k">클로드 분석</span><span>{r.claude.reason}</span>
+                    {r.claude.remediation && (
+                      <>
+                        <span className="k">조치방안</span><span>{r.claude.remediation}</span>
+                      </>
+                    )}
                   </div>
                   {r.claude.example && <pre>{r.claude.example}</pre>}
                 </>

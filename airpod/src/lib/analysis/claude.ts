@@ -27,11 +27,12 @@ const REPORT_TOOL = {
         description:
           "evidence와 failCriterion만 근거로 스스로 판정한 결과. 명확한 근거가 있으면 review보다 pass/fail을 우선하고, 근거가 불충분·환경 의존적일 때만 review.",
       },
-      reason: { type: "string", description: "왜 그 판정인지(위험 이유 또는 양호 이유) 설명" },
-      remediation: { type: "string", description: "구체적 조치 방안" },
-      example: { type: "string", description: "설정/코드 예시" },
+      situation: { type: "string", description: "evidence로 확인된 현재 상황을 사람이 읽기 쉬운 문장으로 서술 (기술적 evidence를 그대로 반복하지 말고 무슨 상태인지 설명)" },
+      reason: { type: "string", description: "그 situation이 왜 이 status(판정)로 이어지는지의 판단 근거 — failCriterion과 evidence를 어떻게 연결해 이 판정을 내렸는지 설명" },
+      remediation: { type: "string", description: "구체적 조치 방안. status가 pass(양호)이면 고칠 게 없으므로 빈 문자열로 남긴다." },
+      example: { type: "string", description: "설정/코드 예시. status가 pass면 빈 문자열이어도 된다." },
     },
-    required: ["status", "reason", "remediation", "example"],
+    required: ["status", "situation", "reason", "remediation", "example"],
   },
 } as const;
 
@@ -79,7 +80,8 @@ async function judgeOne(raw: RawCheck, item: CatalogItem, fallbackStatus: CheckS
     "주어진 evidence와 failCriterion만 근거로 이 항목이 pass(양호)/fail(취약)/review(검토) 중 무엇인지 스스로 판정하라. " +
     "명확한 evidence가 있으면 review보다 pass/fail을 우선하고, evidence가 불충분하거나 환경 의존적일 때만 review로 판정하라. " +
     "failCriterion 밖의 새로운 보안 기준을 만들지 마라. " +
-    "판정 근거·위험 이유(또는 양호 이유)·조치방안·설정 예시를 함께 제시하라. " +
+    "리포트는 situation(현재 상황을 사람이 읽기 쉽게 서술) · reason(그 상황이 왜 이 판정으로 이어지는지 분석) · " +
+    "remediation(구체적 조치 방안, status가 pass면 빈 문자열) · example(설정/코드 예시) 네 부분으로 나눠 작성하라. " +
     "반드시 emit_report 도구로만 답하라.";
 
   const userPayload = sanitize(
@@ -120,7 +122,7 @@ async function judgeOne(raw: RawCheck, item: CatalogItem, fallbackStatus: CheckS
     };
     const toolUse = json.content.find((c) => c.type === "tool_use" && c.name === "emit_report");
     const input = toolUse?.input;
-    if (!input?.reason || !input?.status) {
+    if (!input?.situation || !input?.reason || !input?.status) {
       return stubReport(item, fallbackStatus, safeEvidence, "Claude 응답에 유효한 판정 없음");
     }
     if (input.status !== "pass" && input.status !== "fail" && input.status !== "review") {
@@ -133,8 +135,11 @@ async function judgeOne(raw: RawCheck, item: CatalogItem, fallbackStatus: CheckS
       severity: item.severity,
       title: item.title,
       evidence: safeEvidence,
+      situation: input.situation,
       reason: input.reason,
-      remediation: input.remediation ?? "",
+      // pass(양호)에는 조치할 게 없다 — Claude가 뭘 반환했든 여기서 확정한다(trust boundary: 모델의
+      // 응답을 곧이곧대로 믿지 않고 이 규칙만은 코드가 강제).
+      remediation: input.status === "pass" ? "" : input.remediation ?? "",
       example: input.example ?? "",
       generatedBy: "claude",
     };
@@ -273,9 +278,12 @@ function stubReport(item: CatalogItem, status: CheckStatus, safeEvidence: string
     severity: item.severity,
     title: item.title,
     evidence: safeEvidence,
+    // 폴백은 실제 evidence 텍스트를 그대로 "현재상황"으로 쓴다 — AI 호출 없이 생성하는 것이라
+    // 항목별로 자연어 상황 설명을 따로 캔에 담아두지 않는다.
+    situation: safeEvidence,
     reason: `${base.reason}\n\n(참고: ${note})`,
-    remediation: base.remediation,
-    example: base.example,
+    remediation: status === "pass" ? "" : base.remediation,
+    example: status === "pass" ? "" : base.example,
     generatedBy: "stub",
   };
 }

@@ -18,6 +18,14 @@ const FAIL_RAW: RawCheck = {
   data: { present: true, hitCount: 1, hitLines: [2] },
 };
 
+// C-01은 hitCount 없이 runtimeUid=1000이면 rules.ts 폴백이 pass가 된다.
+const PASS_RAW: RawCheck = {
+  id: "C-01",
+  source: "docker",
+  evidence: "실행 UID: 1000",
+  data: { userDirective: "app", runtimeUid: 1000 },
+};
+
 function withEnvKey<T>(key: string | undefined, fn: () => Promise<T>): Promise<T> {
   const prev = process.env.ANTHROPIC_API_KEY;
   if (key === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -60,6 +68,44 @@ test("no API key: non-skip items fall back to the deterministic rule status", as
   });
 });
 
+test("pass status → remediation/example are forced empty even if the fallback/model would say otherwise", async () => {
+  await withEnvKey(undefined, async () => {
+    const [result] = await judgeAll([PASS_RAW]);
+    assert.equal(result.status, "pass");
+    assert.equal(result.claude!.remediation, "");
+    assert.equal(result.claude!.example, "");
+  });
+
+  const fakeFetchPass = (async () =>
+    new Response(
+      JSON.stringify({
+        content: [
+          {
+            type: "tool_use",
+            name: "emit_report",
+            input: {
+              status: "pass",
+              situation: "적절히 설정됨",
+              reason: "evidence상 문제 없음",
+              remediation: "그래도 이렇게 하세요", // Claude가 실수로 채워도 무시돼야 한다
+              example: "some example",
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as unknown as typeof fetch;
+
+  await withEnvKey("test-key", () =>
+    withFetch(fakeFetchPass, async () => {
+      const [result] = await judgeAll([PASS_RAW]);
+      assert.equal(result.status, "pass");
+      assert.equal(result.claude!.generatedBy, "claude");
+      assert.equal(result.claude!.remediation, "", "remediation must be forced empty on pass regardless of model output");
+    }),
+  );
+});
+
 test("Claude's judged status is authoritative over the deterministic rule status", async () => {
   const fakeFetch = (async () =>
     new Response(
@@ -70,6 +116,7 @@ test("Claude's judged status is authoritative over the deterministic rule status
             name: "emit_report",
             input: {
               status: "review", // 룰 폴백이라면 fail이었을 evidence — AI가 다르게 판정
+              situation: "AI가 파악한 현재 상황",
               reason: "AI가 독립적으로 판정한 이유",
               remediation: "AI가 제시한 조치",
               example: "example",

@@ -69,13 +69,15 @@ export function effectiveStatus(r: CheckResult): CheckStatus {
   return r.override?.status ?? r.status;
 }
 
-// Claude 출력 스키마 (spec §6)
+// Claude 출력 스키마 (spec §6). situation(현재상황)/reason(클로드 분석)/remediation(조치방안,
+// pass면 빈 문자열)로 역할을 나눈다.
 export interface ClaudeReport {
   id: string;
   status: CheckStatus;
   severity: Severity;
   title: string;
   evidence: string;
+  situation: string;
   reason: string;
   remediation: string;
   example: string;

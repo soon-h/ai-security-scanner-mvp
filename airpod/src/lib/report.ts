@@ -60,8 +60,9 @@ function renderResultRow(r: CheckResult): string {
     ? `<div class="report-block">
         <div class="small muted">Claude 분석 ${r.claude.generatedBy === "stub" ? "(stub)" : ""}</div>
         <div class="kv">
-          <span class="k">원인</span><span>${escapeHtml(r.claude.reason)}</span>
-          <span class="k">조치방안</span><span>${escapeHtml(r.claude.remediation)}</span>
+          <span class="k">현재상황</span><span>${escapeHtml(r.claude.situation)}</span>
+          <span class="k">클로드 분석</span><span>${escapeHtml(r.claude.reason)}</span>
+          ${r.claude.remediation ? `<span class="k">조치방안</span><span>${escapeHtml(r.claude.remediation)}</span>` : ""}
         </div>
         ${r.claude.example ? `<pre>${escapeHtml(r.claude.example)}</pre>` : ""}
       </div>`
